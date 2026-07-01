@@ -10,13 +10,19 @@ on:
       - 'databricks.yml'
   workflow_dispatch:  # allow manual trigger
 
-# Target workspace auth: set EITHER PAT (DATABRICKS_TOKEN) OR service
-# principal (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET).
-# If both are set, PAT takes precedence (Databricks CLI behavior).
+# Authentication
+# ---------------
+# The workspace host is set in databricks.yml per target.
 #
-# Source workspace auth: set EITHER PAT (SOURCE_TOKEN) OR service
-# principal (SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET).
-# If both are set, service principal takes precedence (our code).
+# For the TARGET workspace, set any/all of these in GitHub secrets:
+#   - DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET (Service Principal)
+#   - STAGING_TOKEN / PROD_TOKEN (PAT)
+#   The workflow tries SP first; if it fails, falls back to PAT.
+#
+# For the SOURCE workspace, set any/all of these in GitHub secrets:
+#   - SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (Service Principal)
+#   - SOURCE_TOKEN (PAT)
+#   The orchestrator tries SP first; if not set, falls back to PAT.
 
 jobs:
   # -------------------------------------------------------------------
@@ -31,25 +37,68 @@ jobs:
       - uses: databricks/setup-cli@main
 
       - name: Deploy bundle to staging
-        run: databricks bundle deploy -t staging
+        run: |
+          # Try Service Principal first
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            echo "Trying Service Principal authentication..."
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+            if databricks bundle deploy -t staging; then
+              exit 0
+            fi
+            echo "Service Principal auth failed, falling back to PAT..."
+            unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET
+          fi
+
+          # Fall back to PAT
+          if [ -n "$_TOKEN" ]; then
+            echo "Trying PAT authentication..."
+            export DATABRICKS_TOKEN="$_TOKEN"
+            databricks bundle deploy -t staging
+          else
+            echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (STAGING_TOKEN) in GitHub secrets."
+            exit 1
+          fi
         env:
-          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _TOKEN: ${{ secrets.STAGING_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
-          databricks bundle run batch_deploy_agents -t staging \
-            -p source_host=${{ secrets.SOURCE_HOST }} \
-            -p source_token=${{ secrets.SOURCE_TOKEN }} \
-            -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-            -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+          # Try Service Principal first
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            echo "Trying Service Principal authentication..."
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+            if databricks bundle run batch_deploy_agents -t staging \
+                -p source_host=${{ secrets.SOURCE_HOST }} \
+                -p source_token=${{ secrets.SOURCE_TOKEN }} \
+                -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+                -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}; then
+              exit 0
+            fi
+            echo "Service Principal auth failed, falling back to PAT..."
+            unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET
+          fi
+
+          # Fall back to PAT
+          if [ -n "$_TOKEN" ]; then
+            echo "Trying PAT authentication..."
+            export DATABRICKS_TOKEN="$_TOKEN"
+            databricks bundle run batch_deploy_agents -t staging \
+              -p source_host=${{ secrets.SOURCE_HOST }} \
+              -p source_token=${{ secrets.SOURCE_TOKEN }} \
+              -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+              -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+          else
+            echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (STAGING_TOKEN) in GitHub secrets."
+            exit 1
+          fi
         env:
-          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _TOKEN: ${{ secrets.STAGING_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
   # -------------------------------------------------------------------
   # Production (requires manual approval)
@@ -64,22 +113,65 @@ jobs:
       - uses: databricks/setup-cli@main
 
       - name: Deploy bundle to prod
-        run: databricks bundle deploy -t prod
+        run: |
+          # Try Service Principal first
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            echo "Trying Service Principal authentication..."
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+            if databricks bundle deploy -t prod; then
+              exit 0
+            fi
+            echo "Service Principal auth failed, falling back to PAT..."
+            unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET
+          fi
+
+          # Fall back to PAT
+          if [ -n "$_TOKEN" ]; then
+            echo "Trying PAT authentication..."
+            export DATABRICKS_TOKEN="$_TOKEN"
+            databricks bundle deploy -t prod
+          else
+            echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (PROD_TOKEN) in GitHub secrets."
+            exit 1
+          fi
         env:
-          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _TOKEN: ${{ secrets.PROD_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
-          databricks bundle run batch_deploy_agents -t prod \
-            -p source_host=${{ secrets.SOURCE_HOST }} \
-            -p source_token=${{ secrets.SOURCE_TOKEN }} \
-            -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-            -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+          # Try Service Principal first
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            echo "Trying Service Principal authentication..."
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+            if databricks bundle run batch_deploy_agents -t prod \
+                -p source_host=${{ secrets.SOURCE_HOST }} \
+                -p source_token=${{ secrets.SOURCE_TOKEN }} \
+                -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+                -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}; then
+              exit 0
+            fi
+            echo "Service Principal auth failed, falling back to PAT..."
+            unset DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET
+          fi
+
+          # Fall back to PAT
+          if [ -n "$_TOKEN" ]; then
+            echo "Trying PAT authentication..."
+            export DATABRICKS_TOKEN="$_TOKEN"
+            databricks bundle run batch_deploy_agents -t prod \
+              -p source_host=${{ secrets.SOURCE_HOST }} \
+              -p source_token=${{ secrets.SOURCE_TOKEN }} \
+              -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+              -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+          else
+            echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (PROD_TOKEN) in GitHub secrets."
+            exit 1
+          fi
         env:
-          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _TOKEN: ${{ secrets.PROD_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
