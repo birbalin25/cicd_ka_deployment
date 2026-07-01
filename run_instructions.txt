@@ -1,0 +1,945 @@
+================================================================================
+  Knowledge Assistant Batch Deployment Job - Run Instructions
+================================================================================
+
+Contents
+--------
+  1.  Overview
+  2.  Repository Structure
+  3.  Deployment Workflow (Step by Step)
+  4.  Knowledge Source Types
+  5.  Pre-Requisites for Index-Based Sources
+  6.  Pre-Requisites for File-Based Sources
+  7.  The copy_volumes Option (File-Based Sources)
+  8.  Input CSV Format
+  9.  Job Parameters
+  10. Credential Management (Databricks Secrets)
+  11. Running the Job (Manual)
+  12. CI/CD Setup (GitHub Actions)
+  13. CI/CD Setup (Azure DevOps)
+  14. CI/CD Setup (Generic)
+  15. Cross-Workspace Deployment
+  16. API Version Compatibility
+  17. Pre-Flight Checks
+  18. Status Tracking (Delta Table)
+  19. Post-Deployment Tests
+  20. Troubleshooting
+
+
+================================================================================
+1. Overview
+================================================================================
+
+This job deploys Knowledge Assistants (KAs) from a source Databricks workspace
+to a target workspace in batch.  It is driven by a CSV file that lists one or
+more KA agent IDs.  For each row the job:
+
+  1. Exports the KA definition (display name, description, instructions,
+     knowledge sources, examples) from the source workspace via the REST API.
+  2. Runs pre-flight checks to verify all dependencies (volumes, vector search
+     indexes) exist on the target before creating anything.
+  3. Optionally copies UC Volume files from source to target (when the KA
+     uses file-based knowledge sources and copy_volumes=true).
+  4. Creates or replaces the KA in the target workspace, remapping all Unity
+     Catalog paths to the target catalog and schema.
+  5. Attaches knowledge sources and triggers a sync for file-based sources
+     (fire-and-forget, does not block).
+  6. Deploys conversation examples (best-effort; skipped if endpoint not
+     ready yet).
+  7. Runs lightweight verification tests (unless skipped).
+  8. Records every status transition in a Delta table for auditing.
+
+Source workspace credentials are stored in Databricks Secrets (never in
+config files, job parameters, or source control).
+
+
+================================================================================
+2. Repository Structure
+================================================================================
+
+  agent_deployment/
+  |
+  |-- databricks.yml              Bundle definition (job, targets, params)
+  |-- variables.yml               Variables per target (catalog, schema)
+  |-- run_instructions.txt        This file
+  |
+  |-- configs/
+  |   |-- agents_input.csv        Input CSV listing KAs to deploy
+  |
+  |-- src/
+  |   |-- orchestrator.py         Main entry point (batch loop, status tracking)
+  |   |-- export_ka.py            Exports a KA config from the source workspace
+  |   |-- deploy_ka.py            Deploys a KA to the target workspace
+  |   |-- test_runner.py          Post-deploy verification tests
+  |   |-- common.py               Shared helpers (ka_api_call, path remapping,
+  |   |                           CSV I/O, volume copying, Delta table tracking)
+  |
+  |-- .github/
+      |-- workflows/
+          |-- deploy.yml          CI/CD pipeline (GitHub Actions)
+
+
+================================================================================
+3. Deployment Workflow (Step by Step)
+================================================================================
+
+  +--------------------------+
+  |  Read agents_input.csv   |
+  +-----------+--------------+
+              |
+              v
+  +--------------------------+
+  |  Create run_id (UUID)    |
+  |  Init Delta status table |
+  +-----------+--------------+
+              |
+              v
+  +============================+
+  |  FOR EACH KA ROW:         |
+  |                            |
+  |  1. Set status: Deploying  |
+  |                            |
+  |  2. EXPORT from source     |
+  |     - KA definition        |
+  |     - Knowledge sources    |
+  |     - Conversation examples|
+  |                            |
+  |  3. PRE-FLIGHT CHECKS      |
+  |     - Verify index sources |
+  |       exist on target      |
+  |     - Verify volumes exist |
+  |       (or copy if enabled) |
+  |     FAIL FAST if missing   |
+  |                            |
+  |  4. DEPLOY to target       |
+  |     - Delete existing KA   |
+  |       with same name       |
+  |     - Create new KA        |
+  |     - Attach knowledge     |
+  |       sources (remapped)   |
+  |     - Trigger file sync    |
+  |       (fire-and-forget)    |
+  |     - Best-effort examples |
+  |                            |
+  |  5. Set status: Success    |
+  |     (with UI link)         |
+  |                            |
+  |  6. RUN TESTS              |
+  |     (unless skip_tests)    |
+  |     - Verify KA exists     |
+  |     - Verify sources       |
+  |     - Verify endpoint      |
+  |                            |
+  |  On error:                 |
+  |     Set status: Failed     |
+  |     Log error, continue    |
+  +============================+
+              |
+              v
+  +--------------------------+
+  |  Print summary           |
+  |  (Success / Failed cnts) |
+  +--------------------------+
+
+
+================================================================================
+4. Knowledge Source Types
+================================================================================
+
+A KA can have zero or more knowledge sources.  Each source is one of:
+
+  A. Index Source (Vector Search)
+     -----------------------------------------------------------------
+     Backed by a Databricks Vector Search index (a Delta table with
+     pre-computed embeddings).  The deployment remaps the three-part
+     table name (catalog.schema.index_name) to the target catalog and
+     schema.  Index sources sync automatically after attachment.
+
+     Exported config shape:
+       {
+         "source_type": "index",
+         "display_name": "...",
+         "index_name": "src_catalog.src_schema.my_index",
+         "text_col": "content",
+         "doc_uri_col": "document_url"
+       }
+
+  B. File Source (UC Volume)
+     -----------------------------------------------------------------
+     Backed by files (PDFs, text, etc.) stored in a Unity Catalog
+     managed volume at a path like /Volumes/catalog/schema/vol/subdir.
+     The deployment remaps the catalog and schema segments of the path
+     and triggers a manual sync to ingest the files.
+
+     Exported config shape:
+       {
+         "source_type": "files",
+         "display_name": "...",
+         "files_path": "/Volumes/src_catalog/src_schema/docs_vol/pdfs"
+       }
+
+  C. File Table Source (Delta Table)
+     -----------------------------------------------------------------
+     Backed by a Delta table containing document content.  Currently
+     exported but skipped during deployment (not yet fully implemented
+     in deploy_ka.py).
+
+     Exported config shape:
+       {
+         "source_type": "file_table",
+         "display_name": "...",
+         "table_name": "src_catalog.src_schema.documents_table"
+       }
+
+
+================================================================================
+5. Pre-Requisites for Index-Based Sources
+================================================================================
+
+Before deploying a KA that uses index (Vector Search) sources you must ensure
+the following resources exist in the TARGET workspace:
+
+  1. Unity Catalog & Schema
+     The target catalog and schema must exist.  The job does NOT create
+     catalogs or schemas.
+
+  2. Vector Search Index
+     The Vector Search index referenced by the KA must already exist in
+     the target catalog and schema with the SAME index name (only the
+     catalog and schema are remapped; the index name itself is preserved).
+
+     Example:
+       Source:  dev_catalog.dev_schema.product_docs_index
+       Target:  prod_catalog.prod_schema.product_docs_index
+                ^^^^^^^^^^^ ^^^^^^^^^^^
+                remapped     remapped
+
+     The target index must have the same text column and doc_uri column
+     names as the source.
+
+     The job runs a pre-flight check and will FAIL FAST if the index
+     does not exist on the target (the KA will not be created).
+
+  3. Underlying Delta Table
+     The Delta table backing the Vector Search index must be populated
+     and synced before the KA can answer questions.
+
+  4. Network & Permissions
+     The service principal or user running the job must have:
+       - USE CATALOG on the target catalog
+       - USE SCHEMA on the target schema
+       - SELECT on the index and its backing table
+       - Access to the Vector Search endpoint
+
+
+================================================================================
+6. Pre-Requisites for File-Based Sources
+================================================================================
+
+Before deploying a KA that uses file (UC Volume) sources you must ensure:
+
+  1. Unity Catalog & Schema
+     The target catalog and schema must exist.
+
+  2. UC Volume and Files - TWO OPTIONS:
+
+     OPTION A: Automatic copy (copy_volumes=true in agents_input.csv)
+     --------------------------------------------------------
+     Set copy_volumes=true for the KA row and the job will automatically:
+       1. Create the target volume (if it does not already exist).
+       2. List all files in the source volume path.
+       3. Download each file from the source workspace.
+       4. Upload it to the remapped target path (overwriting if exists).
+
+     This requires:
+       - Source workspace credentials in Databricks Secrets (see Section 10).
+       - The service principal must have CREATE VOLUME on the target schema.
+       - Read access to the source volume files (via source credentials).
+
+     OPTION B: Manual setup (copy_volumes=false)
+     --------------------------------------------------------
+     You must manually create the UC Volume and upload files before
+     running the deployment.
+
+       Step 1: Create the volume in the target catalog/schema.
+               The volume name must match the source volume name.
+
+               Example (SQL):
+                 CREATE VOLUME prod_catalog.prod_schema.docs_volume;
+
+               Example (CLI):
+                 databricks volumes create \
+                   --catalog-name prod_catalog \
+                   --schema-name prod_schema \
+                   --name docs_volume \
+                   --volume-type MANAGED
+
+       Step 2: Upload files to the same sub-path structure.
+
+               Example:
+                 Source:  /Volumes/dev_catalog/dev_schema/docs_volume/pdfs/
+                 Target:  /Volumes/prod_catalog/prod_schema/docs_volume/pdfs/
+
+     The job runs a pre-flight check and will FAIL FAST if the volume
+     does not exist on the target when copy_volumes=false (the KA will
+     not be created).
+
+  3. Permissions
+     The service principal or user running the job must have:
+       - USE CATALOG on the target catalog
+       - USE SCHEMA on the target schema
+       - READ VOLUME (or WRITE VOLUME if using copy_volumes=true)
+
+
+================================================================================
+7. The copy_volumes Option (File-Based Sources)
+================================================================================
+
+  Purpose
+  -------
+  When deploying KAs across workspaces, the target workspace may not have the
+  UC Volume and PDF files that the KA's file-based knowledge sources reference.
+
+  copy_volumes is set PER KA ROW in agents_input.csv:
+
+    agent_type,agent_id,...,copy_volumes
+    KA,abc-123,...,true          <-- copies volumes for this KA
+    KA,def-456,...,false         <-- requires volumes to exist already
+
+  How It Works
+  ------------
+  For each KA with one or more "files" type knowledge sources:
+
+    1. Parse the source files_path to extract the volume name.
+       /Volumes/<src_catalog>/<src_schema>/<volume_name>/subpath
+                                           ^^^^^^^^^^^^
+                                           extracted
+
+    2. Create the volume in the target catalog/schema as a MANAGED volume.
+       If the volume already exists, this step is silently skipped.
+
+    3. Download each file from source and upload to target (overwrite=true).
+
+  Idempotency
+  -----------
+    - Volume creation is idempotent (CREATE if not exists).
+    - File uploads use overwrite=true, so re-runs are safe.
+
+
+================================================================================
+8. Input CSV Format
+================================================================================
+
+  File: configs/agents_input.csv
+
+  Columns:
+  -----------------------------------------------------------------------
+  | Column                | Required | Default        | Description
+  |-----------------------|----------|----------------|--------------------
+  | agent_type            | Yes      | --             | Must be "KA"
+  | agent_id              | Yes      | --             | Source KA UUID
+  | target_catalog        | No       | Job param      | Override catalog
+  | target_schema         | No       | Job param      | Override schema
+  | display_name_override | No       | Source name     | Rename in target
+  | skip_tests            | No       | false          | Skip post-deploy
+  |                       |          |                | verification
+  | copy_volumes          | No       | false          | Copy UC Volume
+  |                       |          |                | files from source
+  |                       |          |                | to target
+  -----------------------------------------------------------------------
+
+  Example:
+    agent_type,agent_id,target_catalog,target_schema,display_name_override,skip_tests,copy_volumes
+    KA,ff9426f0-fcab-4a6c-9ffd-aef181066222,,,,false,true
+    KA,aabb1122-ccdd-eeff-0011-223344556677,prod_cat,prod_sch,My Custom KA,false,false
+    KA,99887766-5544-3322-1100-ffeeddccbbaa,,,,true,false
+
+  Notes:
+    - Only rows with agent_type="KA" are processed; others are ignored.
+    - If target_catalog or target_schema are blank, the job-level catalog
+      and schema parameters are used.
+    - display_name_override lets you rename the KA in the target workspace
+      without changing the source.
+    - skip_tests=true skips the three post-deployment checks for that row.
+    - copy_volumes=true copies volume files from source to target for
+      that specific KA (only affects file-based knowledge sources).
+
+
+================================================================================
+9. Job Parameters
+================================================================================
+
+  All parameters are strings.  They can be set via notebook widgets (when
+  running on Databricks), CLI arguments (local), or job parameters (DAB).
+
+  -----------------------------------------------------------------------
+  | Parameter          | Default                     | Description
+  |--------------------|-----------------------------|-----------------------
+  | catalog            | ${var.target_catalog}       | Target UC catalog
+  | schema             | ${var.target_schema}        | Target UC schema
+  | status_table_name  | ""                          | Delta table for status
+  |                    |                             | tracking.  If blank,
+  |                    |                             | defaults to:
+  |                    |                             | {catalog}.{schema}.
+  |                    |                             |   ka_deployment_status
+  -----------------------------------------------------------------------
+
+  NOTE: source_host and source_token are NOT job parameters.  They are
+  read from Databricks Secrets at runtime (see Section 10).
+
+
+================================================================================
+10. Credential Management (Databricks Secrets)
+================================================================================
+
+  Source workspace credentials (source_host, source_token) are stored in
+  Databricks Secrets on the TARGET workspace.  They are NEVER stored in
+  config files, job parameters, environment variables, or source control.
+
+  A. One-Time Setup
+  -----------------
+  Run these commands against the TARGET workspace (where the job runs):
+
+    # 1. Create a secret scope
+    databricks secrets create-scope source-workspace
+
+    # 2. Store the source workspace URL
+    databricks secrets put-secret source-workspace source-host \
+      --string-value "https://source-workspace.cloud.databricks.com"
+
+    # 3. Store the source workspace token (PAT or OAuth token)
+    databricks secrets put-secret source-workspace source-token \
+      --string-value "dapi_your_source_token_here"
+
+  B. How the Job Reads Them
+  -------------------------
+  When running as a Databricks notebook, the orchestrator reads credentials
+  using dbutils.secrets:
+
+    source_host  = dbutils.secrets.get("source-workspace", "source-host")
+    source_token = dbutils.secrets.get("source-workspace", "source-token")
+
+  If the secret scope does not exist or the secrets are not set, the job
+  runs in single-workspace mode (source = target).
+
+  C. Updating Credentials
+  -----------------------
+  To rotate or update credentials:
+
+    databricks secrets put-secret source-workspace source-token \
+      --string-value "dapi_new_token_here"
+
+  No code changes or redeployment needed.
+
+  D. Permissions
+  --------------
+  The service principal running the job must have READ access to the
+  secret scope.  Grant it with:
+
+    databricks secrets put-acl source-workspace \
+      <service-principal-application-id> READ
+
+  E. Local Development
+  --------------------
+  When running locally (not on Databricks), pass credentials via CLI args:
+
+    python src/orchestrator.py \
+      --catalog dev_catalog --schema dev_schema \
+      --source-host https://source-workspace.cloud.databricks.com \
+      --source-token dapi_your_token
+
+  Or use the SOURCE_DATABRICKS_TOKEN environment variable:
+
+    export SOURCE_DATABRICKS_TOKEN=dapi_your_token
+    python src/orchestrator.py \
+      --catalog dev_catalog --schema dev_schema \
+      --source-host https://source-workspace.cloud.databricks.com
+
+
+================================================================================
+11. Running the Job (Manual)
+================================================================================
+
+  A. Via Databricks Asset Bundles (recommended)
+  -----------------------------------------------
+  Deploy and run against a specific target:
+
+    # Deploy bundle (syncs files and registers job)
+    databricks bundle deploy -t prod
+
+    # Run the job
+    databricks bundle run batch_deploy_agents -t prod
+
+    # Run with parameter overrides
+    databricks bundle run batch_deploy_agents -t prod \
+      -p catalog=my_catalog -p schema=my_schema
+
+  B. Locally (for development/testing)
+  -----------------------------------------------
+    export DATABRICKS_HOST=https://target-workspace.cloud.databricks.com
+    export DATABRICKS_TOKEN=dapi_target_token
+
+    python src/orchestrator.py \
+      --catalog dev_catalog \
+      --schema dev_schema \
+      --source-host https://source-workspace.cloud.databricks.com \
+      --source-token dapi_source_token
+
+    Note: Local execution requires a SparkSession, so it must run
+    on a Databricks cluster or with a local Spark installation.
+
+  C. Via Databricks UI
+  -----------------------------------------------
+    1. Navigate to Workflows in the target workspace.
+    2. Find the "Batch Deploy Agents" job.
+    3. Click "Run now" or "Run now with different parameters".
+    4. Fill in parameter values as needed.
+    5. Monitor output in the notebook run.
+
+  Available targets defined in databricks.yml:
+    - dev       (https://dev-workspace.cloud.databricks.com)
+    - staging   (https://fevm-serverless-stable-14ey07.cloud.databricks.com)
+    - prod      (https://e2-demo-west.cloud.databricks.com)
+
+
+================================================================================
+12. CI/CD Setup (GitHub Actions)
+================================================================================
+
+  A. Prerequisites
+  ----------------
+  1. Create a Databricks service principal in your account console:
+     - Account Console > Settings > Service principals > Add
+     - Note the Application ID (client_id)
+
+  2. Generate an OAuth client secret for the service principal:
+     - Service principal > Secrets > Generate new secret
+     - Note the client_secret (shown only once)
+
+  3. Grant the service principal access to the TARGET workspace:
+     - Workspace Admin Console > Service principals > Add
+     - Grant required permissions (jobs, files, volumes, etc.)
+
+  4. Grant READ access to the Databricks Secrets scope:
+     databricks secrets put-acl source-workspace \
+       <service-principal-application-id> READ
+
+  5. Store credentials as GitHub repository secrets:
+     - DATABRICKS_HOST          (target workspace URL)
+     - DATABRICKS_CLIENT_ID     (service principal application ID)
+     - DATABRICKS_CLIENT_SECRET (service principal OAuth secret)
+
+  B. GitHub Actions Workflow
+  --------------------------
+  Create .github/workflows/deploy.yml:
+
+    name: Deploy Knowledge Assistants
+
+    on:
+      push:
+        branches: [main]
+        paths:
+          - 'configs/**'
+          - 'src/**'
+          - 'variables.yml'
+          - 'databricks.yml'
+      workflow_dispatch:  # allow manual trigger
+
+    jobs:
+      deploy-staging:
+        runs-on: ubuntu-latest
+        environment: staging
+        steps:
+          - uses: actions/checkout@v4
+
+          - name: Install Databricks CLI
+            run: |
+              curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+          - name: Deploy and run
+            env:
+              DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+              DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+              DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+            run: |
+              databricks bundle deploy -t staging
+              databricks bundle run batch_deploy_agents -t staging
+
+      deploy-prod:
+        needs: deploy-staging
+        runs-on: ubuntu-latest
+        environment: production   # requires manual approval
+        steps:
+          - uses: actions/checkout@v4
+
+          - name: Install Databricks CLI
+            run: |
+              curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+          - name: Deploy and run
+            env:
+              DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+              DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+              DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+            run: |
+              databricks bundle deploy -t prod
+              databricks bundle run batch_deploy_agents -t prod
+
+  C. How Authentication Works
+  ----------------------------
+  The Databricks CLI automatically detects these environment variables:
+
+    DATABRICKS_HOST           -> target workspace URL
+    DATABRICKS_CLIENT_ID      -> service principal OAuth client ID
+    DATABRICKS_CLIENT_SECRET  -> service principal OAuth client secret
+
+  This is OAuth M2M (machine-to-machine) authentication.  No PATs are
+  used or stored.  The CLI obtains a short-lived OAuth token from the
+  service principal credentials for each command.
+
+  The source workspace credentials are already stored in Databricks
+  Secrets on the target workspace (see Section 10), so the CI/CD
+  pipeline does NOT need source credentials at all.
+
+  D. GitHub Secrets Summary
+  --------------------------
+    Required secrets (per environment):
+    -----------------------------------------------------------------------
+    | Secret                     | Value                    | Purpose
+    |----------------------------|--------------------------|----------------
+    | STAGING_HOST (or           | https://staging.cloud.   | Target workspace
+    |   DATABRICKS_HOST)         |   databricks.com         |   URL
+    | PROD_HOST (or              | https://prod.cloud.      | Target workspace
+    |   DATABRICKS_HOST)         |   databricks.com         |   URL
+    | DATABRICKS_CLIENT_ID       | <service principal       | OAuth client ID
+    |                            |  application ID>         |
+    | DATABRICKS_CLIENT_SECRET   | <service principal       | OAuth secret
+    |                            |  client secret>          |
+    -----------------------------------------------------------------------
+
+    NOT needed in CI/CD:
+      - Source workspace host/token (read from Databricks Secrets at runtime)
+      - Any PATs (OAuth M2M replaces them)
+
+
+================================================================================
+13. CI/CD Setup (Azure DevOps)
+================================================================================
+
+  For Azure DevOps pipelines, the same principles apply.  Use a
+  service principal and OAuth M2M authentication.
+
+  A. Pipeline YAML (azure-pipelines.yml)
+  ----------------------------------------
+    trigger:
+      branches:
+        include:
+          - main
+      paths:
+        include:
+          - configs/*
+          - src/*
+          - variables.yml
+          - databricks.yml
+
+    stages:
+      - stage: Staging
+        jobs:
+          - job: DeployStaging
+            pool:
+              vmImage: ubuntu-latest
+            steps:
+              - script: |
+                  curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+                displayName: Install Databricks CLI
+
+              - script: |
+                  databricks bundle deploy -t staging
+                  databricks bundle run batch_deploy_agents -t staging
+                displayName: Deploy and Run
+                env:
+                  DATABRICKS_HOST: $(STAGING_HOST)
+                  DATABRICKS_CLIENT_ID: $(DATABRICKS_CLIENT_ID)
+                  DATABRICKS_CLIENT_SECRET: $(DATABRICKS_CLIENT_SECRET)
+
+      - stage: Production
+        dependsOn: Staging
+        condition: succeeded()
+        jobs:
+          - deployment: DeployProd
+            environment: production   # requires approval
+            pool:
+              vmImage: ubuntu-latest
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - script: |
+                        curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+                      displayName: Install Databricks CLI
+                    - script: |
+                        databricks bundle deploy -t prod
+                        databricks bundle run batch_deploy_agents -t prod
+                      displayName: Deploy and Run
+                      env:
+                        DATABRICKS_HOST: $(PROD_HOST)
+                        DATABRICKS_CLIENT_ID: $(DATABRICKS_CLIENT_ID)
+                        DATABRICKS_CLIENT_SECRET: $(DATABRICKS_CLIENT_SECRET)
+
+  B. Variable Groups
+  -------------------
+  Store secrets in Azure DevOps variable groups (linked to Azure Key Vault
+  for best security):
+
+    - STAGING_HOST / PROD_HOST
+    - DATABRICKS_CLIENT_ID
+    - DATABRICKS_CLIENT_SECRET
+
+
+================================================================================
+14. CI/CD Setup (Generic)
+================================================================================
+
+  For any CI/CD tool (Jenkins, GitLab CI, CircleCI, etc.), the pattern is:
+
+  1. Install the Databricks CLI:
+       curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+  2. Set environment variables for OAuth M2M authentication:
+       export DATABRICKS_HOST=https://target-workspace.cloud.databricks.com
+       export DATABRICKS_CLIENT_ID=<service-principal-client-id>
+       export DATABRICKS_CLIENT_SECRET=<service-principal-client-secret>
+
+  3. Deploy the bundle:
+       databricks bundle deploy -t <target>
+
+  4. Run the job:
+       databricks bundle run batch_deploy_agents -t <target>
+
+  5. (Optional) Check results:
+       databricks bundle run batch_deploy_agents -t <target> --output json
+
+  Source workspace credentials are stored in Databricks Secrets (Section 10)
+  and read at runtime by the notebook.  The CI/CD pipeline only needs
+  credentials for the TARGET workspace.
+
+
+================================================================================
+15. Cross-Workspace Deployment
+================================================================================
+
+  This job supports deploying KAs from one workspace (source) to another
+  (target).  The orchestrator uses two SDK clients:
+
+    source_client  - Reads KA definitions, downloads files.
+                     Built from Databricks Secrets (source-workspace scope).
+    target_client  - Deploys KAs, uploads files, creates volumes.
+                     Built from the workspace running the notebook
+                     (or DATABRICKS_HOST/TOKEN env vars locally).
+
+  When source credentials are not configured, both clients point to the
+  same workspace (single-workspace mode).
+
+  Path remapping:
+    All Unity Catalog references are automatically remapped from the
+    source catalog/schema to the target catalog/schema:
+
+      /Volumes/src_cat/src_sch/vol/file  -->  /Volumes/tgt_cat/tgt_sch/vol/file
+      src_cat.src_sch.index_name         -->  tgt_cat.tgt_sch.index_name
+
+
+================================================================================
+16. API Version Compatibility
+================================================================================
+
+  The Knowledge Assistants REST API exists at two versions:
+    - API 2.1: /api/2.1/knowledge-assistants/{id}
+    - API 2.0: /api/2.0/knowledge-assistants/{id}
+
+  Different workspaces may support different versions.  The job handles
+  this transparently via the ka_api_call() helper in common.py:
+
+    1. Tries API 2.1 first.
+    2. If 2.1 fails, falls back to API 2.0.
+    3. Caches the detected version per workspace host to avoid
+       repeated probes.
+    4. If both versions fail, raises the 2.1 error (which contains
+       the actual problem, e.g. "Volume does not exist").
+
+  All API calls send an empty JSON body ({}) even for GET requests,
+  because some workspaces reject bodyless requests.
+
+  This means the job works on both newer and older workspaces without
+  any configuration.  The source and target can run different versions.
+
+
+================================================================================
+17. Pre-Flight Checks
+================================================================================
+
+  Before creating a KA on the target, the job validates that all
+  knowledge source dependencies exist.  This prevents orphaned KAs
+  (created but non-functional due to missing resources).
+
+  A. Index Sources
+     The job calls vector_search_indexes.get_index() on the target
+     for each index source (after remapping catalog/schema).  If the
+     index does not exist, deployment fails with:
+
+       "Vector search index 'catalog.schema.index_name' does not exist
+        on target workspace. Create the index before deploying this KA."
+
+  B. File Sources (copy_volumes=false)
+     The job calls volumes.read() on the target to verify the volume
+     exists.  If it does not exist, deployment fails with:
+
+       "Volume 'catalog.schema.volume_name' does not exist on target
+        workspace and copy_volumes is false. Set copy_volumes=true in
+        agents_input.csv or create the volume manually."
+
+  C. File Sources (copy_volumes=true)
+     The job copies the volume and files from source to target before
+     creating the KA.  No pre-flight check needed (volume is created
+     automatically).
+
+  In all failure cases, the KA is NOT created.  The error is recorded
+  in the Delta status table and the job continues to the next row.
+
+
+================================================================================
+18. Status Tracking (Delta Table)
+================================================================================
+
+  The job writes deployment progress to a Delta table for auditing and
+  monitoring.  Default table: {catalog}.{schema}.ka_deployment_status
+
+  Schema:
+    run_id                STRING      Unique ID for this batch run
+    agent_type            STRING      "KA"
+    agent_id              STRING      Source KA UUID
+    target_catalog        STRING      Target catalog used
+    target_schema         STRING      Target schema used
+    display_name_override STRING      Custom name (or blank)
+    skip_tests            STRING      "true" or "false"
+    status                STRING      Deployment status (see below)
+    error_details         STRING      Error/status message
+    test_status           STRING      Test result (see below)
+    test_error_details    STRING      Test error message
+    updated_at            TIMESTAMP   Last update time
+
+  Status transitions:
+    status:       Pending  -->  Deploying  -->  Success (with status message)
+                                           -->  Failed (with error_details)
+
+    test_status:  Pending  -->  Pass
+                           -->  Fail (with test_error_details)
+                           -->  Skipped (if skip_tests=true)
+
+  On success, error_details contains a status message with a UI link:
+    "KA created. File source sync in progress - check status:
+     https://workspace.cloud.databricks.com/ml/bricks/ka/configure/<id>"
+
+  Querying results:
+    -- Latest run
+    SELECT * FROM {catalog}.{schema}.ka_deployment_status
+    ORDER BY updated_at DESC
+    LIMIT 10;
+
+    -- Specific run
+    SELECT * FROM {catalog}.{schema}.ka_deployment_status
+    WHERE run_id = '<run_id>'
+    ORDER BY updated_at;
+
+    -- Summary by status
+    SELECT status, count(*) as cnt
+    FROM {catalog}.{schema}.ka_deployment_status
+    WHERE run_id = '<run_id>'
+    GROUP BY status;
+
+
+================================================================================
+19. Post-Deployment Tests
+================================================================================
+
+  After each successful deployment, the test runner performs three checks
+  (unless skip_tests=true for that row):
+
+    Test 1: Verify Exists
+      Calls the KA REST API to confirm the KA exists.
+      Pass: 200 OK response.
+      Fail: 404 or any error.
+
+    Test 2: Verify Sources
+      Lists knowledge sources for the KA and checks the list is not empty.
+      Pass: At least one knowledge source attached.
+      Fail: Empty knowledge sources list.
+
+    Test 3: Verify Endpoint
+      Checks for the serving endpoint named ka-{id_prefix}-endpoint.
+      Pass: Endpoint exists.
+      Fail: Endpoint not found.
+
+  All three must pass for test_status=Pass.  Any failure sets test_status=Fail
+  with details in test_error_details.  Test failures do NOT mark the
+  deployment as Failed - they are tracked separately.
+
+
+================================================================================
+20. Troubleshooting
+================================================================================
+
+  Problem: "SparkSession not available"
+    Cause:  Running locally without Spark.
+    Fix:    Run on a Databricks cluster or set up local Spark.
+
+  Problem: "Volume 'x.y.z' does not exist on target workspace and
+            copy_volumes is false"
+    Cause:  File-based source references a volume that doesn't exist
+            on the target, and copy_volumes is not enabled for this KA.
+    Fix:    Either set copy_volumes=true for this row in agents_input.csv,
+            or manually create the volume and upload files.
+
+  Problem: "Vector search index 'x.y.z' does not exist on target workspace"
+    Cause:  The index must already exist in the target catalog/schema.
+    Fix:    Create the Vector Search index in the target workspace before
+            deploying.  The job remaps catalog/schema but does not create
+            indexes.
+
+  Problem: Status shows "Failed" with permission errors
+    Cause:  The service principal lacks required UC permissions.
+    Fix:    Grant USE CATALOG, USE SCHEMA, and relevant table/volume
+            permissions to the service principal.
+
+  Problem: "could not add example (endpoint may not be ready yet)"
+    Cause:  The KA serving endpoint is still provisioning.
+    Fix:    This is expected.  The KA is created successfully; examples
+            can be added later once the endpoint is online.  Check the
+            KA in the UI using the link in the status message.
+
+  Problem: KA deployed but answers are empty
+    Cause:  File-based sources may not have finished syncing.
+    Fix:    Wait for the sync to complete.  Check the KA's knowledge
+            sources in the UI - each source shows its sync status.
+            The link is in the Delta table's error_details column.
+
+  Problem: copy_volumes=true but files aren't copying
+    Cause:  Source credentials may be incorrect or missing from
+            Databricks Secrets.
+    Fix:    Verify secrets are set correctly:
+              databricks secrets list-secrets source-workspace
+            Update if needed:
+              databricks secrets put-secret source-workspace source-token \
+                --string-value "dapi_new_token"
+
+  Problem: "Secret scope 'source-workspace' does not exist"
+    Cause:  Databricks Secrets not configured on the target workspace.
+    Fix:    Follow the one-time setup in Section 10.
+
+  Problem: CI/CD pipeline fails with authentication errors
+    Cause:  Service principal credentials are incorrect or expired.
+    Fix:    Verify DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET
+            are set correctly in CI/CD secrets.  Regenerate the OAuth
+            client secret if expired.
+
+================================================================================

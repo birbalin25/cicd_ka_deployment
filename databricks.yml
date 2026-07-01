@@ -1,0 +1,49 @@
+bundle:
+  name: knowledge-assistant-deployment
+
+include:
+  - variables.yml
+
+targets:
+  dev:
+    mode: development
+    workspace:
+      host: https://dev-workspace.cloud.databricks.com
+      profile: dev
+
+  staging:
+    workspace:
+      host: https://fevm-serverless-stable-14ey07.cloud.databricks.com/
+      profile: fevm
+
+  prod:
+    workspace:
+      host: https://e2-demo-west.cloud.databricks.com
+      profile: demow
+
+resources:
+  jobs:
+    batch_deploy_agents:
+      name: "Batch Deploy Agents"
+      parameters:
+        - name: catalog
+          default: ${var.target_catalog}
+        - name: schema
+          default: ${var.target_schema}
+        - name: status_table_name
+          default: ${var.status_table_name}
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - databricks-sdk>=0.40.0
+      tasks:
+        - task_key: batch_deploy
+          notebook_task:
+            notebook_path: ./src/orchestrator.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              status_table_name: "{{job.parameters.status_table_name}}"
+          environment_key: default

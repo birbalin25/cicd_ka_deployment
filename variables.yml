@@ -1,0 +1,27 @@
+variables:
+  target_catalog:
+    description: "Target catalog name"
+    default: "main"
+  target_schema:
+    description: "Target schema name"
+    default: "default"
+  status_table_name:
+    description: "Fully qualified Delta table for batch deployment status tracking (default: {catalog}.{schema}.ka_deployment_status)"
+    default: ""
+
+
+targets:
+  dev:
+    variables:
+      target_catalog: "dev_catalog"
+      target_schema: "dev_schema"
+
+  staging:
+    variables:
+      target_catalog: "serverless_stable_14ey07_catalog"
+      target_schema: "mbi"
+
+  prod:
+    variables:
+      target_catalog: "main"
+      target_schema: "deploy"

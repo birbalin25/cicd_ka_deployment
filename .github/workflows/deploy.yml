@@ -1,0 +1,61 @@
+name: Deploy Knowledge Assistants
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'configs/**'
+      - 'src/**'
+      - 'variables.yml'
+      - 'databricks.yml'
+
+jobs:
+  # -------------------------------------------------------------------
+  # Staging
+  # -------------------------------------------------------------------
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Deploy bundle to staging
+        run: databricks bundle deploy -t staging
+        env:
+          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
+
+      - name: Run batch deployment
+        run: |
+          databricks bundle run batch_deploy_agents -t staging \
+            --params source_host=${{ secrets.SOURCE_HOST }},source_token=${{ secrets.SOURCE_TOKEN }}
+        env:
+          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
+
+  # -------------------------------------------------------------------
+  # Production (requires manual approval)
+  # -------------------------------------------------------------------
+  deploy-prod:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Deploy bundle to prod
+        run: databricks bundle deploy -t prod
+        env:
+          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
+
+      - name: Run batch deployment
+        run: |
+          databricks bundle run batch_deploy_agents -t prod \
+            --params source_host=${{ secrets.SOURCE_HOST }},source_token=${{ secrets.SOURCE_TOKEN }}
+        env:
+          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
