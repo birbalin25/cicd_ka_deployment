@@ -1,6 +1,6 @@
 variables:
   target_catalog:
-    description: "Target catalog name"
+    description: "Target catalog namee"
     default: "main"
   target_schema:
     description: "Target schema name"
