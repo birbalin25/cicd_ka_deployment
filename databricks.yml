@@ -13,13 +13,13 @@ targets:
 
   staging:
     workspace:
-      host: https://fevm-serverless-stable-14ey07.cloud.databricks.com/
-      profile: fevm
+      host: https://e2-demo-west.cloud.databricks.com
+      # profile: fevm
 
   prod:
     workspace:
       host: https://e2-demo-west.cloud.databricks.com
-      profile: demow
+      # profile: demow
 
 resources:
   jobs:
