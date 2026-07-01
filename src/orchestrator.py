@@ -56,27 +56,19 @@ from test_runner import run_tests
 def _resolve_params() -> dict:
     """Return deployment parameters from notebook widgets or CLI args.
 
-    Source workspace credentials (source_host, source_token) are read from
-    Databricks Secrets when running as a notebook, or from CLI args / env
-    vars when running locally.  They are never passed as job parameters.
+    Source workspace credentials are passed as job parameters (from CI/CD
+    secrets) or CLI args (local dev).  Uses service principal OAuth M2M
+    (client_id + client_secret) instead of PATs.
     """
     dbutils = get_dbutils()
     if dbutils is not None:
-        # Source credentials from Databricks Secrets (scope: source-workspace)
-        source_host = None
-        source_token = None
-        try:
-            source_host = dbutils.secrets.get("source-workspace", "source-host")
-            source_token = dbutils.secrets.get("source-workspace", "source-token")
-        except Exception:
-            pass  # No cross-workspace config — single-workspace mode
-
         return {
             "catalog": dbutils.widgets.get("catalog"),
             "schema": dbutils.widgets.get("schema"),
             "status_table_name": dbutils.widgets.get("status_table_name"),
-            "source_host": source_host,
-            "source_token": source_token,
+            "source_host": dbutils.widgets.get("source_host"),
+            "source_client_id": dbutils.widgets.get("source_client_id"),
+            "source_client_secret": dbutils.widgets.get("source_client_secret"),
         }
 
     parser = argparse.ArgumentParser(description="Batch deploy KAs from CSV")
@@ -86,15 +78,18 @@ def _resolve_params() -> dict:
                         help="Fully qualified Delta table for status tracking")
     parser.add_argument("--source-host", default=None,
                         help="Source workspace URL (default: same as target)")
-    parser.add_argument("--source-token", default=None,
-                        help="Source workspace token (or set SOURCE_DATABRICKS_TOKEN)")
+    parser.add_argument("--source-client-id", default=None,
+                        help="Source workspace service principal client ID")
+    parser.add_argument("--source-client-secret", default=None,
+                        help="Source workspace service principal client secret")
     args = parser.parse_args()
     return {
         "catalog": args.catalog,
         "schema": args.schema,
         "status_table_name": args.status_table_name,
         "source_host": args.source_host,
-        "source_token": args.source_token,
+        "source_client_id": args.source_client_id,
+        "source_client_secret": args.source_client_secret,
     }
 
 
@@ -102,15 +97,23 @@ def _resolve_params() -> dict:
 # Workspace client helpers
 # ---------------------------------------------------------------------------
 
-def _build_source_client(source_host: str | None, source_token: str | None) -> WorkspaceClient:
+def _build_source_client(
+    source_host: str | None,
+    source_client_id: str | None,
+    source_client_secret: str | None,
+) -> WorkspaceClient:
     """Build a WorkspaceClient for the source workspace.
 
-    If source_host is provided, creates a separate client.
+    If source_host is provided, creates a separate client using
+    service principal OAuth M2M authentication.
     Otherwise returns a client using default env vars (same workspace).
     """
     if source_host:
-        token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
-        return WorkspaceClient(host=source_host, token=token)
+        return WorkspaceClient(
+            host=source_host,
+            client_id=source_client_id,
+            client_secret=source_client_secret,
+        )
     return WorkspaceClient()
 
 
@@ -237,7 +240,9 @@ def main() -> None:
 
     # Build workspace clients
     source_client = _build_source_client(
-        params.get("source_host"), params.get("source_token")
+        params.get("source_host"),
+        params.get("source_client_id"),
+        params.get("source_client_secret"),
     )
     target_client = WorkspaceClient()
 

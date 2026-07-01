@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'variables.yml'
       - 'databricks.yml'
+  workflow_dispatch:  # allow manual trigger
 
 jobs:
   # -------------------------------------------------------------------
@@ -15,6 +16,7 @@ jobs:
   # -------------------------------------------------------------------
   deploy-staging:
     runs-on: ubuntu-latest
+    environment: staging
     steps:
       - uses: actions/checkout@v4
 
@@ -24,15 +26,19 @@ jobs:
         run: databricks bundle deploy -t staging
         env:
           DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
           databricks bundle run batch_deploy_agents -t staging \
-            --params source_host=${{ secrets.SOURCE_HOST }},source_token=${{ secrets.SOURCE_TOKEN }}
+            -p source_host=${{ secrets.SOURCE_HOST }} \
+            -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+            -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
         env:
           DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
   # -------------------------------------------------------------------
   # Production (requires manual approval)
@@ -50,12 +56,16 @@ jobs:
         run: databricks bundle deploy -t prod
         env:
           DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
           databricks bundle run batch_deploy_agents -t prod \
-            --params source_host=${{ secrets.SOURCE_HOST }},source_token=${{ secrets.SOURCE_TOKEN }}
+            -p source_host=${{ secrets.SOURCE_HOST }} \
+            -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
+            -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
         env:
           DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}

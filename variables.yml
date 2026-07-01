@@ -8,6 +8,15 @@ variables:
   status_table_name:
     description: "Fully qualified Delta table for batch deployment status tracking (default: {catalog}.{schema}.ka_deployment_status)"
     default: ""
+  source_host:
+    description: "Source workspace URL for cross-workspace export (blank = same workspace)"
+    default: ""
+  source_client_id:
+    description: "Source workspace service principal client ID"
+    default: ""
+  source_client_secret:
+    description: "Source workspace service principal client secret"
+    default: ""
 
 
 targets:
