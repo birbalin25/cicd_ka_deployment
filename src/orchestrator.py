@@ -56,9 +56,10 @@ from test_runner import run_tests
 def _resolve_params() -> dict:
     """Return deployment parameters from notebook widgets or CLI args.
 
-    Source workspace credentials are passed as job parameters (from CI/CD
-    secrets) or CLI args (local dev).  Uses service principal OAuth M2M
-    (client_id + client_secret) instead of PATs.
+    Source workspace supports two auth methods (service principal takes
+    precedence if both are provided):
+      - Service principal: source_client_id + source_client_secret
+      - PAT: source_token
     """
     dbutils = get_dbutils()
     if dbutils is not None:
@@ -67,6 +68,7 @@ def _resolve_params() -> dict:
             "schema": dbutils.widgets.get("schema"),
             "status_table_name": dbutils.widgets.get("status_table_name"),
             "source_host": dbutils.widgets.get("source_host"),
+            "source_token": dbutils.widgets.get("source_token"),
             "source_client_id": dbutils.widgets.get("source_client_id"),
             "source_client_secret": dbutils.widgets.get("source_client_secret"),
         }
@@ -78,6 +80,8 @@ def _resolve_params() -> dict:
                         help="Fully qualified Delta table for status tracking")
     parser.add_argument("--source-host", default=None,
                         help="Source workspace URL (default: same as target)")
+    parser.add_argument("--source-token", default=None,
+                        help="Source workspace PAT (or set SOURCE_DATABRICKS_TOKEN)")
     parser.add_argument("--source-client-id", default=None,
                         help="Source workspace service principal client ID")
     parser.add_argument("--source-client-secret", default=None,
@@ -88,6 +92,7 @@ def _resolve_params() -> dict:
         "schema": args.schema,
         "status_table_name": args.status_table_name,
         "source_host": args.source_host,
+        "source_token": args.source_token,
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
     }
@@ -99,22 +104,29 @@ def _resolve_params() -> dict:
 
 def _build_source_client(
     source_host: str | None,
+    source_token: str | None,
     source_client_id: str | None,
     source_client_secret: str | None,
 ) -> WorkspaceClient:
     """Build a WorkspaceClient for the source workspace.
 
-    If source_host is provided, creates a separate client using
-    service principal OAuth M2M authentication.
-    Otherwise returns a client using default env vars (same workspace).
+    If source_host is provided, creates a separate client.
+    Auth priority: service principal (client_id + client_secret) first,
+    then PAT (source_token).
+    If source_host is blank, returns default client (same workspace).
     """
-    if source_host:
+    if not source_host:
+        return WorkspaceClient()
+
+    if source_client_id and source_client_secret:
         return WorkspaceClient(
             host=source_host,
             client_id=source_client_id,
             client_secret=source_client_secret,
         )
-    return WorkspaceClient()
+
+    token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
+    return WorkspaceClient(host=source_host, token=token)
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +253,7 @@ def main() -> None:
     # Build workspace clients
     source_client = _build_source_client(
         params.get("source_host"),
+        params.get("source_token"),
         params.get("source_client_id"),
         params.get("source_client_secret"),
     )

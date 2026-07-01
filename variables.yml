@@ -11,8 +11,11 @@ variables:
   source_host:
     description: "Source workspace URL for cross-workspace export (blank = same workspace)"
     default: ""
+  source_token:
+    description: "Source workspace PAT (used if service principal credentials are not provided)"
+    default: ""
   source_client_id:
-    description: "Source workspace service principal client ID"
+    description: "Source workspace service principal client ID (takes precedence over PAT)"
     default: ""
   source_client_secret:
     description: "Source workspace service principal client secret"

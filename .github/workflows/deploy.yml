@@ -10,6 +10,14 @@ on:
       - 'databricks.yml'
   workflow_dispatch:  # allow manual trigger
 
+# Target workspace auth: set EITHER PAT (DATABRICKS_TOKEN) OR service
+# principal (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET).
+# If both are set, PAT takes precedence (Databricks CLI behavior).
+#
+# Source workspace auth: set EITHER PAT (SOURCE_TOKEN) OR service
+# principal (SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET).
+# If both are set, service principal takes precedence (our code).
+
 jobs:
   # -------------------------------------------------------------------
   # Staging
@@ -26,6 +34,7 @@ jobs:
         run: databricks bundle deploy -t staging
         env:
           DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
@@ -33,10 +42,12 @@ jobs:
         run: |
           databricks bundle run batch_deploy_agents -t staging \
             -p source_host=${{ secrets.SOURCE_HOST }} \
+            -p source_token=${{ secrets.SOURCE_TOKEN }} \
             -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
             -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
         env:
           DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
@@ -56,6 +67,7 @@ jobs:
         run: databricks bundle deploy -t prod
         env:
           DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
 
@@ -63,9 +75,11 @@ jobs:
         run: |
           databricks bundle run batch_deploy_agents -t prod \
             -p source_host=${{ secrets.SOURCE_HOST }} \
+            -p source_token=${{ secrets.SOURCE_TOKEN }} \
             -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
             -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
         env:
           DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
