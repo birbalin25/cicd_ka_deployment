@@ -1,3 +1,4 @@
 agent_type,agent_id,target_catalog,target_schema,display_name_override,skip_tests,copy_volumes
 KA,ba42f26d-3a09-4025-a380-c7527770d320,,,bir-first-ka,false,false
 KA,e2756793-fb6c-4bb5-9820-77a3a0103147,main,deploy2,bir-second-ka,false,true
+KA,e2756793-fb6c-4bb5-9820-77a3a0103148,main,deploy2,bir-second-ka,false,true
