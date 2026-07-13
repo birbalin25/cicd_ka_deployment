@@ -4,21 +4,27 @@ bundle:
 include:
   - variables.yml
 
+# Workspace host per target:
+#   - For local CLI: uncomment and set 'host' below, or use a 'profile'
+#     that maps to a host in ~/.databrickscfg.
+#   - For CI/CD: set the DATABRICKS_HOST env var (e.g. from GitHub secrets
+#     STAGING_HOST / PROD_HOST). The CLI uses it when 'host' is not set.
+
 targets:
   dev:
     mode: development
     workspace:
-      host: https://dev-workspace.cloud.databricks.com
-      profile: dev
+      # host: https://dev-workspace.cloud.databricks.com
+      # profile: dev
 
   staging:
     workspace:
-      host: https://adb-984752964297111.11.azuredatabricks.net
+      # host: https://staging-workspace.cloud.databricks.com
       # profile: fevm
 
   prod:
     workspace:
-      host: https://e2-demo-west.cloud.databricks.com
+      # host: https://prod-workspace.cloud.databricks.com
       # profile: demow
 
 resources:

@@ -10,18 +10,18 @@ on:
       - 'databricks.yml'
   workflow_dispatch:  # allow manual trigger
 
-# Authentication
-# ---------------
-# The workspace host is set in databricks.yml per target.
-#
-# For the TARGET workspace, set any/all of these in GitHub secrets:
+# Authentication & Host Configuration
+# ------------------------------------
+# For the TARGET workspace, set these in GitHub secrets:
+#   - STAGING_HOST / PROD_HOST (workspace URL, e.g. https://xyz.cloud.databricks.com)
 #   - DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET (Service Principal)
-#   - STAGING_TOKEN / PROD_TOKEN (PAT)
+#   - STAGING_TOKEN / PROD_TOKEN (PAT — fallback if SP fails)
 #   The workflow tries SP first; if it fails, falls back to PAT.
 #
-# For the SOURCE workspace, set any/all of these in GitHub secrets:
+# For the SOURCE workspace, set these in GitHub secrets:
+#   - SOURCE_HOST (source workspace URL)
 #   - SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (Service Principal)
-#   - SOURCE_TOKEN (PAT)
+#   - SOURCE_TOKEN (PAT — fallback if SP not set)
 #   The orchestrator tries SP first; if not set, falls back to PAT.
 
 jobs:
@@ -60,6 +60,7 @@ jobs:
             exit 1
           fi
         env:
+          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
           _TOKEN: ${{ secrets.STAGING_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
@@ -96,6 +97,7 @@ jobs:
             exit 1
           fi
         env:
+          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
           _TOKEN: ${{ secrets.STAGING_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
@@ -136,6 +138,7 @@ jobs:
             exit 1
           fi
         env:
+          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
           _TOKEN: ${{ secrets.PROD_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
@@ -172,6 +175,7 @@ jobs:
             exit 1
           fi
         env:
+          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
           _TOKEN: ${{ secrets.PROD_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
