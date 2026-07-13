@@ -46,12 +46,41 @@ resources:
           default: ${var.source_client_id}
         - name: source_client_secret
           default: ${var.source_client_secret}
-      environments:
-        - environment_key: default
-          spec:
-            client: "1"
-            dependencies:
-              - databricks-sdk>=0.40.0
+      # ---------------------------------------------------------------
+      # Compute configuration
+      # ---------------------------------------------------------------
+      # Option 1: Classic compute (default — works for cross-cloud/
+      #           cross-workspace deployments without SNP restrictions).
+      #
+      # Option 2: Serverless compute (faster cold start, no cluster to
+      #           manage, but may fail with "Cert validation" errors on
+      #           cross-cloud API calls due to SNP restrictions).
+      #
+      # To switch: comment out the unwanted option and uncomment the
+      # other in both the job-level config and the task-level config.
+      # ---------------------------------------------------------------
+
+      # --- Option 1: Classic compute ---
+      job_clusters:
+        - job_cluster_key: deploy_cluster
+          new_cluster:
+            spark_version: ${var.cluster_spark_version}
+            node_type_id: ${var.cluster_node_type}
+            num_workers: 0
+            spark_conf:
+              spark.master: "local[*]"
+              spark.databricks.cluster.profile: singleNode
+            custom_tags:
+              ResourceClass: SingleNode
+
+      # --- Option 2: Serverless compute (uncomment to use) ---
+      # environments:
+      #   - environment_key: default
+      #     spec:
+      #       client: "1"
+      #       dependencies:
+      #         - databricks-sdk>=0.40.0
+
       tasks:
         - task_key: batch_deploy
           notebook_task:
@@ -64,4 +93,10 @@ resources:
               source_token: "{{job.parameters.source_token}}"
               source_client_id: "{{job.parameters.source_client_id}}"
               source_client_secret: "{{job.parameters.source_client_secret}}"
-          environment_key: default
+          # --- Option 1: Classic compute ---
+          job_cluster_key: deploy_cluster
+          libraries:
+            - pypi:
+                package: databricks-sdk>=0.40.0
+          # --- Option 2: Serverless compute (uncomment to use) ---
+          # environment_key: default

@@ -20,6 +20,12 @@ variables:
   source_client_secret:
     description: "Source workspace service principal client secret"
     default: ""
+  cluster_spark_version:
+    description: "Spark version for classic compute (ignored when compute_type=serverless)"
+    default: "15.4.x-scala2.12"
+  cluster_node_type:
+    description: "Node type for classic compute (ignored when compute_type=serverless)"
+    default: "i3.xlarge"
 
 
 targets:
@@ -32,6 +38,8 @@ targets:
     variables:
       target_catalog: "bircatalog"
       target_schema: "birschema"
+      # Azure workspaces use different node types
+      # cluster_node_type: "Standard_DS3_v2"
 
   prod:
     variables:
