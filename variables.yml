@@ -25,7 +25,7 @@ variables:
     default: "15.4.x-scala2.12"
   cluster_node_type:
     description: "Node type for classic compute (ignored when compute_type=serverless)"
-    default: "i3.xlarge"
+    default: "Standard_DS3_v2"
 
 
 targets:
