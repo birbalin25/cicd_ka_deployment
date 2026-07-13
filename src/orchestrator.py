@@ -111,22 +111,35 @@ def _build_source_client(
     """Build a WorkspaceClient for the source workspace.
 
     If source_host is provided, creates a separate client.
-    Auth priority: service principal (client_id + client_secret) first,
-    then PAT (source_token).
+    Auth priority: service principal (client_id + client_secret) first;
+    if SP fails connectivity check, falls back to PAT (source_token).
     If source_host is blank, returns default client (same workspace).
     """
     if not source_host:
         return WorkspaceClient()
 
     if source_client_id and source_client_secret:
-        return WorkspaceClient(
-            host=source_host,
-            client_id=source_client_id,
-            client_secret=source_client_secret,
-        )
+        try:
+            sp_client = WorkspaceClient(
+                host=source_host,
+                client_id=source_client_id,
+                client_secret=source_client_secret,
+            )
+            sp_client.current_user.me()
+            print(f"  Source auth: service principal OK")
+            return sp_client
+        except Exception as ex:
+            print(f"  Source auth: SP failed ({ex}), falling back to PAT...")
 
     token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
-    return WorkspaceClient(host=source_host, token=token)
+    if not token:
+        raise RuntimeError(
+            "Source workspace authentication failed. "
+            "Set SOURCE_TOKEN (PAT) or SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (SP)."
+        )
+    pat_client = WorkspaceClient(host=source_host, token=token)
+    print(f"  Source auth: PAT OK")
+    return pat_client
 
 
 # ---------------------------------------------------------------------------
