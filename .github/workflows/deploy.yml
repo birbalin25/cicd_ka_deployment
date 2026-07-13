@@ -43,11 +43,7 @@ jobs:
             echo "Trying Service Principal authentication..."
             export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
             export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
-            if databricks bundle deploy -t staging \
-                --var="source_host=$_SOURCE_HOST" \
-                --var="source_token=$_SOURCE_TOKEN" \
-                --var="source_client_id=$_SOURCE_CLIENT_ID" \
-                --var="source_client_secret=$_SOURCE_CLIENT_SECRET"; then
+            if databricks bundle deploy -t staging; then
               exit 0
             fi
             echo "Service Principal auth failed, falling back to PAT..."
@@ -58,11 +54,7 @@ jobs:
           if [ -n "$_TOKEN" ]; then
             echo "Trying PAT authentication..."
             export DATABRICKS_TOKEN="$_TOKEN"
-            databricks bundle deploy -t staging \
-              --var="source_host=$_SOURCE_HOST" \
-              --var="source_token=$_SOURCE_TOKEN" \
-              --var="source_client_id=$_SOURCE_CLIENT_ID" \
-              --var="source_client_secret=$_SOURCE_CLIENT_SECRET"
+            databricks bundle deploy -t staging
           else
             echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (STAGING_TOKEN) in GitHub secrets."
             exit 1
@@ -72,10 +64,10 @@ jobs:
           _TOKEN: ${{ secrets.STAGING_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          _SOURCE_HOST: ${{ secrets.SOURCE_HOST }}
-          _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
-          _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
-          _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
+          BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
+          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
+          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
+          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
@@ -84,11 +76,7 @@ jobs:
             echo "Trying Service Principal authentication..."
             export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
             export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
-            if databricks bundle run batch_deploy_agents -t staging \
-                -p source_host=${{ secrets.SOURCE_HOST }} \
-                -p source_token=${{ secrets.SOURCE_TOKEN }} \
-                -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-                -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}; then
+            if databricks bundle run batch_deploy_agents -t staging; then
               exit 0
             fi
             echo "Service Principal auth failed, falling back to PAT..."
@@ -99,11 +87,7 @@ jobs:
           if [ -n "$_TOKEN" ]; then
             echo "Trying PAT authentication..."
             export DATABRICKS_TOKEN="$_TOKEN"
-            databricks bundle run batch_deploy_agents -t staging \
-              -p source_host=${{ secrets.SOURCE_HOST }} \
-              -p source_token=${{ secrets.SOURCE_TOKEN }} \
-              -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-              -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+            databricks bundle run batch_deploy_agents -t staging
           else
             echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (STAGING_TOKEN) in GitHub secrets."
             exit 1
@@ -113,6 +97,10 @@ jobs:
           _TOKEN: ${{ secrets.STAGING_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
+          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
+          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
+          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
   # -------------------------------------------------------------------
   # Production (requires manual approval)
@@ -133,11 +121,7 @@ jobs:
             echo "Trying Service Principal authentication..."
             export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
             export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
-            if databricks bundle deploy -t prod \
-                --var="source_host=$_SOURCE_HOST" \
-                --var="source_token=$_SOURCE_TOKEN" \
-                --var="source_client_id=$_SOURCE_CLIENT_ID" \
-                --var="source_client_secret=$_SOURCE_CLIENT_SECRET"; then
+            if databricks bundle deploy -t prod; then
               exit 0
             fi
             echo "Service Principal auth failed, falling back to PAT..."
@@ -148,11 +132,7 @@ jobs:
           if [ -n "$_TOKEN" ]; then
             echo "Trying PAT authentication..."
             export DATABRICKS_TOKEN="$_TOKEN"
-            databricks bundle deploy -t prod \
-              --var="source_host=$_SOURCE_HOST" \
-              --var="source_token=$_SOURCE_TOKEN" \
-              --var="source_client_id=$_SOURCE_CLIENT_ID" \
-              --var="source_client_secret=$_SOURCE_CLIENT_SECRET"
+            databricks bundle deploy -t prod
           else
             echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (PROD_TOKEN) in GitHub secrets."
             exit 1
@@ -162,10 +142,10 @@ jobs:
           _TOKEN: ${{ secrets.PROD_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          _SOURCE_HOST: ${{ secrets.SOURCE_HOST }}
-          _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
-          _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
-          _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
+          BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
+          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
+          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
+          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
@@ -174,11 +154,7 @@ jobs:
             echo "Trying Service Principal authentication..."
             export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
             export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
-            if databricks bundle run batch_deploy_agents -t prod \
-                -p source_host=${{ secrets.SOURCE_HOST }} \
-                -p source_token=${{ secrets.SOURCE_TOKEN }} \
-                -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-                -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}; then
+            if databricks bundle run batch_deploy_agents -t prod; then
               exit 0
             fi
             echo "Service Principal auth failed, falling back to PAT..."
@@ -189,11 +165,7 @@ jobs:
           if [ -n "$_TOKEN" ]; then
             echo "Trying PAT authentication..."
             export DATABRICKS_TOKEN="$_TOKEN"
-            databricks bundle run batch_deploy_agents -t prod \
-              -p source_host=${{ secrets.SOURCE_HOST }} \
-              -p source_token=${{ secrets.SOURCE_TOKEN }} \
-              -p source_client_id=${{ secrets.SOURCE_CLIENT_ID }} \
-              -p source_client_secret=${{ secrets.SOURCE_CLIENT_SECRET }}
+            databricks bundle run batch_deploy_agents -t prod
           else
             echo "Error: No credentials configured. Set SP (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET) or PAT (PROD_TOKEN) in GitHub secrets."
             exit 1
@@ -203,3 +175,7 @@ jobs:
           _TOKEN: ${{ secrets.PROD_TOKEN }}
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
+          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
+          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
+          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
