@@ -10,7 +10,7 @@ on:
       - 'databricks.yml'
   workflow_dispatch:  # allow manual trigger
 
-# Authentication & Host Configuration
+# Authentication & Host Configurationn
 # ------------------------------------
 # For the TARGET workspace, set these in GitHub secrets:
 #   - STAGING_HOST / PROD_HOST (workspace URL, e.g. https://xyz.cloud.databricks.com)
