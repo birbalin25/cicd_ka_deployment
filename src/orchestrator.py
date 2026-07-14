@@ -23,6 +23,7 @@ Usage (local):
 
 import argparse
 import os
+import time
 import traceback
 import uuid
 
@@ -30,6 +31,7 @@ from databricks.sdk import WorkspaceClient
 
 from common import (
     build_source_client,
+    check_ka_active,
     copy_volume_files,
     get_dbutils,
     get_job_context,
@@ -39,6 +41,7 @@ from common import (
     read_csv,
     remap_path,
     remap_volume_path,
+    update_row_copied_examples,
     update_row_deploy_result,
     update_row_deploy_started,
     update_row_test_status,
@@ -74,6 +77,7 @@ def _resolve_params() -> dict:
             "source_token": dbutils.widgets.get("source_token"),
             "source_client_id": dbutils.widgets.get("source_client_id"),
             "source_client_secret": dbutils.widgets.get("source_client_secret"),
+            "wait_and_copy_examples": dbutils.widgets.get("wait_and_copy_examples"),
         }
 
     parser = argparse.ArgumentParser(description="Batch deploy KAs from CSV")
@@ -89,6 +93,8 @@ def _resolve_params() -> dict:
                         help="Source workspace service principal client ID")
     parser.add_argument("--source-client-secret", default=None,
                         help="Source workspace service principal client secret")
+    parser.add_argument("--wait-and-copy-examples", default="false",
+                        help="Wait for KA ACTIVE and copy examples inline (default: false)")
     args = parser.parse_args()
     return {
         "catalog": args.catalog,
@@ -98,6 +104,7 @@ def _resolve_params() -> dict:
         "source_token": args.source_token,
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
+        "wait_and_copy_examples": args.wait_and_copy_examples,
     }
 
 
@@ -241,6 +248,7 @@ def main() -> None:
     params = _resolve_params()
     catalog = params["catalog"]
     schema = params["schema"]
+    wait_and_copy = (params.get("wait_and_copy_examples") or "").strip().lower() == "true"
 
     # Build status table name: use explicit param or default convention
     status_table_name = (params.get("status_table_name") or "").strip()
@@ -384,7 +392,7 @@ def main() -> None:
             )
             continue
 
-    # Print summary from Delta table
+    # Print Phase 1 summary
     summary_df = spark.sql(
         f"""
         SELECT status, count(*) as cnt
@@ -394,10 +402,121 @@ def main() -> None:
         """
     )
     print(f"\n{'='*60}")
-    print(f"Batch deployment complete  (run_id={run_id})")
+    print(f"Phase 1 — Deployment complete  (run_id={run_id})")
     print(f"{'='*60}")
     for row in summary_df.collect():
         print(f"  {row['status']}: {row['cnt']}")
+
+    # ------------------------------------------------------------------
+    # Phase 2: Copy examples inline (only if wait_and_copy_examples=true)
+    # ------------------------------------------------------------------
+    if not wait_and_copy:
+        print(f"\nwait_and_copy_examples=false — examples copy deferred to Copy KA Examples job.")
+    else:
+        pending_rows = spark.sql(
+            f"""
+            SELECT agent_id, target_ka_name, source_display_name,
+                   source_example_count
+            FROM {status_table_name}
+            WHERE run_id = '{run_id}' AND copied_examples = 'Pending'
+            """
+        ).collect()
+
+        if not pending_rows:
+            print(f"\nNo KAs with pending examples to copy.")
+        else:
+            print(f"\n{'='*60}")
+            print(f"Phase 2 — Copying examples for {len(pending_rows)} KA(s) (wait_and_copy_examples=true)")
+            print(f"{'='*60}")
+
+            for prow in pending_rows:
+                agent_id = prow["agent_id"]
+                target_ka_name = prow["target_ka_name"]
+                src_example_count = prow["source_example_count"]
+                ka_id = target_ka_name.split("/")[-1] if "/" in target_ka_name else target_ka_name
+
+                print(f"\n  Waiting for KA {ka_id} to become ACTIVE (max 30 min)...")
+
+                try:
+                    is_active, ka_state, wait_secs, checks = check_ka_active(
+                        target_client, ka_id, max_wait=1800, poll_interval=30
+                    )
+
+                    if not is_active:
+                        msg = (
+                            f"KA not ready: state={ka_state} after {wait_secs}s ({checks} checks). "
+                            f"Use Copy KA Examples job to retry later."
+                        )
+                        print(f"  {msg}")
+                        update_row_copied_examples(
+                            spark, status_table_name, run_id, agent_id,
+                            f"Failed: {msg} Job_id={job_id}, Job_run_id={job_run_id}",
+                        )
+                        continue
+
+                    print(f"  KA ACTIVE after {wait_secs}s (check {checks}). Copying examples...")
+
+                    resp = ka_api_call(
+                        source_client, "GET",
+                        f"knowledge-assistants/{agent_id}/examples",
+                    )
+                    examples = resp.get("examples", [])
+                    print(f"  Fetched {len(examples)} example(s) from source")
+
+                    added = 0
+                    failed_examples = []
+                    t0 = time.time()
+                    for ex in examples:
+                        try:
+                            ka_api_call(target_client, "POST", f"{target_ka_name}/examples", body={
+                                "question": ex.get("question", ""),
+                                "guidelines": ex.get("guidelines", []),
+                            })
+                            added += 1
+                        except Exception as e:
+                            failed_examples.append(str(e))
+                    elapsed = round(time.time() - t0, 1)
+
+                    # Validate
+                    try:
+                        val_resp = ka_api_call(
+                            target_client, "GET", f"{target_ka_name}/examples",
+                        )
+                        target_count = len(val_resp.get("examples", []))
+                    except Exception:
+                        target_count = added
+
+                    if target_count >= src_example_count:
+                        msg = (
+                            f"Examples copied successfully. "
+                            f"Copied {added}/{len(examples)} in {elapsed}s, "
+                            f"validated {target_count} on target. "
+                            f"Job_id={job_id}, Job_run_id={job_run_id}"
+                        )
+                    else:
+                        msg = (
+                            f"Partial copy ({target_count}/{src_example_count}). "
+                            f"Copied {added}/{len(examples)} in {elapsed}s. "
+                            f"Job_id={job_id}, Job_run_id={job_run_id}"
+                        )
+                        if failed_examples:
+                            msg += f" Errors: {'; '.join(failed_examples[:3])}"
+
+                    print(f"  {msg}")
+                    update_row_copied_examples(
+                        spark, status_table_name, run_id, agent_id, msg,
+                    )
+
+                except Exception as ex:
+                    msg = f"Failed: {ex}. Job_id={job_id}, Job_run_id={job_run_id}"
+                    print(f"  {msg}")
+                    update_row_copied_examples(
+                        spark, status_table_name, run_id, agent_id, msg,
+                    )
+
+            print(f"\n{'='*60}")
+            print(f"Phase 2 — Examples copy complete")
+            print(f"{'='*60}")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ from databricks.sdk import WorkspaceClient
 
 from common import (
     build_source_client,
+    check_ka_active,
     get_dbutils,
     get_job_context,
     get_spark,
@@ -79,39 +80,6 @@ def _resolve_params() -> dict:
         "source_client_secret": args.source_client_secret,
         "run_id": args.run_id,
     }
-
-
-# ---------------------------------------------------------------------------
-# KA state check with polling
-# ---------------------------------------------------------------------------
-
-def _check_ka_active(w, ka_id, max_wait=180, poll_interval=30):
-    """Check if KA is ACTIVE, polling up to max_wait seconds.
-
-    Returns (is_active, ka_state, elapsed, attempts).
-    """
-    elapsed = 0
-    attempts = 0
-
-    while elapsed <= max_wait:
-        attempts += 1
-        try:
-            resp = ka_api_call(w, "GET", f"knowledge-assistants/{ka_id}")
-            state = resp.get("state", "UNKNOWN")
-        except Exception:
-            state = "UNKNOWN"
-
-        if state == "ACTIVE":
-            return True, state, elapsed, attempts
-
-        if elapsed >= max_wait:
-            break
-
-        print(f"    KA state: {state}, waiting {poll_interval}s (check {attempts})...")
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-
-    return False, state, elapsed, attempts
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +177,7 @@ def main() -> None:
 
         try:
             # Sanity check: is KA ACTIVE?
-            is_active, ka_state, wait_secs, checks = _check_ka_active(
+            is_active, ka_state, wait_secs, checks = check_ka_active(
                 target_client, ka_id, max_wait=180, poll_interval=30
             )
 

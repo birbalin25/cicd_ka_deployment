@@ -26,6 +26,8 @@ resources:
           default: ${var.source_client_id}
         - name: source_client_secret
           default: ${var.source_client_secret}
+        - name: wait_and_copy_examples
+          default: ${var.wait_and_copy_examples}
       environments:
         - environment_key: default
           spec:
@@ -44,6 +46,7 @@ resources:
               source_token: "{{job.parameters.source_token}}"
               source_client_id: "{{job.parameters.source_client_id}}"
               source_client_secret: "{{job.parameters.source_client_secret}}"
+              wait_and_copy_examples: "{{job.parameters.wait_and_copy_examples}}"
           environment_key: default
 
     copy_examples_job:

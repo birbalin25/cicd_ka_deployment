@@ -57,6 +57,35 @@ def ka_api_call(w, method, path, body=None):
             raise e_first
 
 
+def check_ka_active(w, ka_id, max_wait=180, poll_interval=30):
+    """Check if KA is ACTIVE, polling up to max_wait seconds.
+
+    Returns (is_active, ka_state, elapsed, attempts).
+    """
+    elapsed = 0
+    attempts = 0
+
+    while elapsed <= max_wait:
+        attempts += 1
+        try:
+            resp = ka_api_call(w, "GET", f"knowledge-assistants/{ka_id}")
+            state = resp.get("state", "UNKNOWN")
+        except Exception:
+            state = "UNKNOWN"
+
+        if state == "ACTIVE":
+            return True, state, elapsed, attempts
+
+        if elapsed >= max_wait:
+            break
+
+        print(f"    KA state: {state}, waiting {poll_interval}s (check {attempts})...")
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+    return False, state, elapsed, attempts
+
+
 # ---------------------------------------------------------------------------
 # Databricks notebook detection
 # ---------------------------------------------------------------------------
