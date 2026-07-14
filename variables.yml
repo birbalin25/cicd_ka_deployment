@@ -36,12 +36,12 @@ targets:
 
   staging:
     variables:
-      target_catalog: "bircatalog"
+      target_catalog: "dev"
       target_schema: "birschema"
       # Azure workspaces use different node types
       # cluster_node_type: "Standard_DS3_v2"
 
   prod:
     variables:
-      target_catalog: "bircatalog"
+      target_catalog: "dev"
       target_schema: "birschema"
