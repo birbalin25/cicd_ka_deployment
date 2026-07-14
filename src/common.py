@@ -11,6 +11,7 @@ import os
 import time
 from datetime import datetime, timezone
 
+from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.catalog import VolumeType
 
 
@@ -71,6 +72,71 @@ def get_dbutils():
 
 
 # ---------------------------------------------------------------------------
+# Job context
+# ---------------------------------------------------------------------------
+
+def get_job_context() -> tuple[str, str]:
+    """Return (job_id, job_run_id) from the Databricks job context.
+
+    Returns ("local", "local") when running outside a Databricks job.
+    """
+    spark = get_spark()
+    if spark is not None:
+        try:
+            job_id = spark.conf.get("spark.databricks.job.id", "")
+            job_run_id = spark.conf.get("spark.databricks.job.runId", "")
+            if job_id and job_run_id:
+                return job_id, job_run_id
+        except Exception:
+            pass
+    return "local", "local"
+
+
+# ---------------------------------------------------------------------------
+# Source workspace client builder
+# ---------------------------------------------------------------------------
+
+def build_source_client(
+    source_host: str | None,
+    source_token: str | None,
+    source_client_id: str | None,
+    source_client_secret: str | None,
+) -> WorkspaceClient:
+    """Build a WorkspaceClient for the source workspace.
+
+    If source_host is provided, creates a separate client.
+    Auth priority: service principal (client_id + client_secret) first;
+    if SP fails connectivity check, falls back to PAT (source_token).
+    If source_host is blank, returns default client (same workspace).
+    """
+    if not source_host:
+        return WorkspaceClient()
+
+    if source_client_id and source_client_secret:
+        try:
+            sp_client = WorkspaceClient(
+                host=source_host,
+                client_id=source_client_id,
+                client_secret=source_client_secret,
+            )
+            sp_client.current_user.me()
+            print(f"  Source auth: service principal OK")
+            return sp_client
+        except Exception as ex:
+            print(f"  Source auth: SP failed ({ex}), falling back to PAT...")
+
+    token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
+    if not token:
+        raise RuntimeError(
+            "Source workspace authentication failed. "
+            "Set SOURCE_TOKEN (PAT) or SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (SP)."
+        )
+    pat_client = WorkspaceClient(host=source_host, token=token)
+    print(f"  Source auth: PAT OK")
+    return pat_client
+
+
+# ---------------------------------------------------------------------------
 # UC path remapping (extracted from deploy_ka.py)
 # ---------------------------------------------------------------------------
 
@@ -118,18 +184,7 @@ def remap_path(original_path: str, catalog: str, schema: str) -> str:
 def copy_volume_files(source_client, target_client, source_path, target_catalog, target_schema):
     """Create target volume (if needed) and copy files from source volume path.
 
-    Parameters
-    ----------
-    source_client : WorkspaceClient
-        Client for the source workspace.
-    target_client : WorkspaceClient
-        Client for the target workspace.
-    source_path : str
-        UC Volume path in source, e.g. /Volumes/cat/schema/vol_name/subpath.
-    target_catalog : str
-        Target catalog name.
-    target_schema : str
-        Target schema name.
+    Returns dict with file_count, elapsed_seconds, target_path.
     """
     # Parse source path: /Volumes/<cat>/<schema>/<volume_name>/...
     parts = source_path.strip("/").split("/")
@@ -204,15 +259,26 @@ def get_spark():
         return None
 
 
+def _escape_sql(value: str) -> str:
+    """Escape single quotes for safe SQL string interpolation."""
+    return value.replace("'", "\\'")
+
+
 # ---------------------------------------------------------------------------
-# Delta table status tracking
+# Delta table: ka_deployment_status (owned by deploy job)
 # ---------------------------------------------------------------------------
 
-_CREATE_TABLE_SQL = """
+_CREATE_DEPLOY_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS {table_name} (
     run_id STRING,
+    job_id STRING,
+    job_run_id STRING,
     agent_type STRING,
     agent_id STRING,
+    target_ka_name STRING,
+    source_example_count INT,
+    source_host STRING,
+    target_host STRING,
     target_catalog STRING,
     target_schema STRING,
     display_name_override STRING,
@@ -221,9 +287,24 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     status_desc STRING,
     test_status STRING,
     test_status_desc STRING,
+    created_at TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
     updated_at TIMESTAMP
 )
 """
+
+_DEPLOY_NEW_COLUMNS = [
+    ("job_id", "STRING"),
+    ("job_run_id", "STRING"),
+    ("target_ka_name", "STRING"),
+    ("source_example_count", "INT"),
+    ("source_host", "STRING"),
+    ("target_host", "STRING"),
+    ("created_at", "TIMESTAMP"),
+    ("started_at", "TIMESTAMP"),
+    ("completed_at", "TIMESTAMP"),
+]
 
 
 def init_deployment_table(
@@ -233,9 +314,13 @@ def init_deployment_table(
     run_id: str,
     default_catalog: str,
     default_schema: str,
+    job_id: str = "",
+    job_run_id: str = "",
+    source_host: str = "",
+    target_host: str = "",
 ) -> None:
     """Create the status table (if needed) and insert Pending rows."""
-    spark.sql(_CREATE_TABLE_SQL.format(table_name=table_name))
+    spark.sql(_CREATE_DEPLOY_TABLE_SQL.format(table_name=table_name))
 
     # Migrate old column names if table existed before the rename
     try:
@@ -244,6 +329,18 @@ def init_deployment_table(
             spark.sql(f"ALTER TABLE {table_name} RENAME COLUMN error_details TO status_desc")
         if "test_error_details" in cols and "test_status_desc" not in cols:
             spark.sql(f"ALTER TABLE {table_name} RENAME COLUMN test_error_details TO test_status_desc")
+    except Exception:
+        pass
+
+    # Add new columns to existing tables
+    try:
+        cols = [c.name for c in spark.table(table_name).schema]
+        for col_name, col_type in _DEPLOY_NEW_COLUMNS:
+            if col_name not in cols:
+                try:
+                    spark.sql(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -258,16 +355,25 @@ def init_deployment_table(
             INSERT INTO {table_name}
             VALUES (
                 '{run_id}',
+                '{job_id}',
+                '{job_run_id}',
                 '{row.get("agent_type", "KA")}',
                 '{row["agent_id"]}',
+                '',
+                0,
+                '{_escape_sql(source_host)}',
+                '{_escape_sql(target_host)}',
                 '{target_catalog}',
                 '{target_schema}',
-                '{display_name}',
+                '{_escape_sql(display_name)}',
                 '{skip_tests}',
                 'Pending',
                 '',
                 'Pending',
                 '',
+                current_timestamp(),
+                NULL,
+                NULL,
                 current_timestamp()
             )
             """
@@ -283,12 +389,51 @@ def update_row_status(
     status_desc: str = "",
 ) -> None:
     """Update the deployment status for a single row."""
-    escaped_error = status_desc.replace("'", "\\'")
     spark.sql(
         f"""
         UPDATE {table_name}
         SET status = '{status}',
-            status_desc = '{escaped_error}',
+            status_desc = '{_escape_sql(status_desc)}',
+            updated_at = current_timestamp()
+        WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
+        """
+    )
+
+
+def update_row_deploy_started(
+    spark, table_name: str, run_id: str, agent_id: str
+) -> None:
+    """Mark a row as Deploying with started_at timestamp."""
+    spark.sql(
+        f"""
+        UPDATE {table_name}
+        SET status = 'Deploying',
+            started_at = current_timestamp(),
+            updated_at = current_timestamp()
+        WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
+        """
+    )
+
+
+def update_row_deploy_result(
+    spark,
+    table_name: str,
+    run_id: str,
+    agent_id: str,
+    status: str,
+    status_desc: str,
+    target_ka_name: str = "",
+    source_example_count: int = 0,
+) -> None:
+    """Update a row with final deploy result including target KA info."""
+    spark.sql(
+        f"""
+        UPDATE {table_name}
+        SET status = '{status}',
+            status_desc = '{_escape_sql(status_desc)}',
+            target_ka_name = '{_escape_sql(target_ka_name)}',
+            source_example_count = {source_example_count},
+            completed_at = current_timestamp(),
             updated_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
@@ -304,12 +449,104 @@ def update_row_test_status(
     test_status_desc: str = "",
 ) -> None:
     """Update the test status for a single row."""
-    escaped_error = test_status_desc.replace("'", "\\'")
     spark.sql(
         f"""
         UPDATE {table_name}
         SET test_status = '{test_status}',
-            test_status_desc = '{escaped_error}',
+            test_status_desc = '{_escape_sql(test_status_desc)}',
+            updated_at = current_timestamp()
+        WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
+        """
+    )
+
+
+# ---------------------------------------------------------------------------
+# Delta table: ka_examples_status (owned by copier job)
+# ---------------------------------------------------------------------------
+
+_CREATE_EXAMPLES_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS {table_name} (
+    run_id STRING,
+    job_id STRING,
+    job_run_id STRING,
+    agent_id STRING,
+    target_ka_name STRING,
+    display_name STRING,
+    source_host STRING,
+    target_host STRING,
+    source_example_count INT,
+    target_example_count INT,
+    copy_status STRING,
+    copy_details STRING,
+    created_at TIMESTAMP,
+    copied_at TIMESTAMP,
+    updated_at TIMESTAMP
+)
+"""
+
+
+def init_examples_table(spark, table_name: str) -> None:
+    """Create the examples status table if it doesn't exist."""
+    spark.sql(_CREATE_EXAMPLES_TABLE_SQL.format(table_name=table_name))
+
+
+def insert_examples_row(
+    spark,
+    table_name: str,
+    run_id: str,
+    job_id: str,
+    job_run_id: str,
+    agent_id: str,
+    target_ka_name: str,
+    display_name: str,
+    source_host: str,
+    target_host: str,
+    source_example_count: int,
+) -> None:
+    """Insert a Pending row into the examples status table."""
+    spark.sql(
+        f"""
+        INSERT INTO {table_name}
+        VALUES (
+            '{run_id}',
+            '{job_id}',
+            '{job_run_id}',
+            '{agent_id}',
+            '{_escape_sql(target_ka_name)}',
+            '{_escape_sql(display_name)}',
+            '{_escape_sql(source_host)}',
+            '{_escape_sql(target_host)}',
+            {source_example_count},
+            0,
+            'Pending',
+            '',
+            current_timestamp(),
+            NULL,
+            current_timestamp()
+        )
+        """
+    )
+
+
+def update_examples_copy(
+    spark,
+    table_name: str,
+    run_id: str,
+    agent_id: str,
+    copy_status: str,
+    copy_details: str,
+    target_example_count: int = 0,
+    set_copied_at: bool = False,
+) -> None:
+    """Update the copy result for an examples row."""
+    copied_at_clause = "copied_at = current_timestamp()," if set_copied_at else ""
+    spark.sql(
+        f"""
+        UPDATE {table_name}
+        SET copy_status = '{copy_status}',
+            copy_details = '{_escape_sql(copy_details)}',
+            target_example_count = {target_example_count},
+            {copied_at_clause}
             updated_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """

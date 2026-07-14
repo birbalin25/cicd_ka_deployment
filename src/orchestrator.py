@@ -29,22 +29,24 @@ import uuid
 from databricks.sdk import WorkspaceClient
 
 from common import (
+    build_source_client,
     copy_volume_files,
     get_dbutils,
+    get_job_context,
     get_spark,
     init_deployment_table,
     ka_api_call,
     read_csv,
     remap_path,
     remap_volume_path,
-    update_row_status,
+    update_row_deploy_result,
+    update_row_deploy_started,
     update_row_test_status,
 )
 from export_ka import export_knowledge_assistant
 from deploy_ka import (
     deploy_assistant as deploy_ka_assistant,
     deploy_knowledge_sources,
-    deploy_examples as deploy_ka_examples,
 )
 from test_runner import run_tests
 
@@ -99,50 +101,6 @@ def _resolve_params() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Workspace client helpers
-# ---------------------------------------------------------------------------
-
-def _build_source_client(
-    source_host: str | None,
-    source_token: str | None,
-    source_client_id: str | None,
-    source_client_secret: str | None,
-) -> WorkspaceClient:
-    """Build a WorkspaceClient for the source workspace.
-
-    If source_host is provided, creates a separate client.
-    Auth priority: service principal (client_id + client_secret) first;
-    if SP fails connectivity check, falls back to PAT (source_token).
-    If source_host is blank, returns default client (same workspace).
-    """
-    if not source_host:
-        return WorkspaceClient()
-
-    if source_client_id and source_client_secret:
-        try:
-            sp_client = WorkspaceClient(
-                host=source_host,
-                client_id=source_client_id,
-                client_secret=source_client_secret,
-            )
-            sp_client.current_user.me()
-            print(f"  Source auth: service principal OK")
-            return sp_client
-        except Exception as ex:
-            print(f"  Source auth: SP failed ({ex}), falling back to PAT...")
-
-    token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
-    if not token:
-        raise RuntimeError(
-            "Source workspace authentication failed. "
-            "Set SOURCE_TOKEN (PAT) or SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (SP)."
-        )
-    pat_client = WorkspaceClient(host=source_host, token=token)
-    print(f"  Source auth: PAT OK")
-    return pat_client
-
-
-# ---------------------------------------------------------------------------
 # Single-agent deployment wrapper
 # ---------------------------------------------------------------------------
 
@@ -164,10 +122,10 @@ def _deploy_single_ka(
     schema: str,
     display_name_override: str | None,
     copy_volumes: bool = False,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
     """Export and deploy a single KA.
 
-    Returns (ka_name, status_description).
+    Returns (ka_name, status_description, source_example_count).
     """
     status_parts = []
 
@@ -176,6 +134,9 @@ def _deploy_single_ka(
 
     if display_name_override:
         config["display_name"] = display_name_override
+
+    # Count examples in source
+    source_example_count = len(config.get("examples", []))
 
     # Pre-flight: verify all knowledge source dependencies exist on target
     file_sources = [
@@ -254,11 +215,9 @@ def _deploy_single_ka(
         print("  File source sync triggered (running in background).")
         status_parts.append("File sync: triggered (background)")
 
-    # Deploy examples — only wait for endpoint if examples exist
-    examples = config.get("examples", [])
-    if examples:
-        examples_msg = deploy_ka_examples(target_client, ka_name, examples)
-        status_parts.append(examples_msg)
+    # Record example info (examples are copied by the separate copier job)
+    if source_example_count > 0:
+        status_parts.append(f"Examples: {source_example_count} in source (copy deferred to examples job)")
     else:
         status_parts.append("Examples: none in source")
 
@@ -269,7 +228,7 @@ def _deploy_single_ka(
 
     status_msg = " | ".join(status_parts)
     print(f"  {status_msg}")
-    return ka_name, status_msg
+    return ka_name, status_msg, source_example_count
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +246,17 @@ def main() -> None:
         status_table_name = f"{catalog}.{schema}.ka_deployment_status"
 
     # Build workspace clients
-    source_client = _build_source_client(
+    source_client = build_source_client(
         params.get("source_host"),
         params.get("source_token"),
         params.get("source_client_id"),
         params.get("source_client_secret"),
     )
     target_client = WorkspaceClient()
+
+    # Capture workspace hosts
+    source_host = (source_client.config.host or "").rstrip("/")
+    target_host = (target_client.config.host or "").rstrip("/")
 
     # Read input CSV from bundle workspace files (relative to this notebook)
     try:
@@ -311,12 +274,18 @@ def main() -> None:
 
     # Initialize Delta status tracking
     run_id = str(uuid.uuid4())
+    job_id, job_run_id = get_job_context()
     spark = get_spark()
     if spark is None:
         raise RuntimeError(
             "SparkSession not available. This notebook must run on Databricks."
         )
-    init_deployment_table(spark, status_table_name, ka_rows, run_id, catalog, schema)
+    init_deployment_table(
+        spark, status_table_name, ka_rows, run_id,
+        catalog, schema,
+        job_id=job_id, job_run_id=job_run_id,
+        source_host=source_host, target_host=target_host,
+    )
     print(f"Status tracking: {status_table_name}  (run_id={run_id})")
 
     print(f"\n{'='*60}")
@@ -332,10 +301,10 @@ def main() -> None:
         copy_volumes = row.get("copy_volumes", "").strip().lower() == "true"
 
         print(f"\nDeploying KA {agent_id} ...")
-        update_row_status(spark, status_table_name, run_id, agent_id, "Deploying")
+        update_row_deploy_started(spark, status_table_name, run_id, agent_id)
 
         try:
-            ka_name, status_msg = _deploy_single_ka(
+            ka_name, status_msg, example_count = _deploy_single_ka(
                 source_client, target_client,
                 agent_id, row_catalog, row_schema,
                 display_override,
@@ -343,7 +312,12 @@ def main() -> None:
             )
             deployed_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
 
-            update_row_status(spark, status_table_name, run_id, agent_id, "Success", status_msg)
+            update_row_deploy_result(
+                spark, status_table_name, run_id, agent_id,
+                "Success", status_msg,
+                target_ka_name=ka_name,
+                source_example_count=example_count,
+            )
 
             # Run tests unless skipped
             if not skip_tests:
@@ -361,7 +335,7 @@ def main() -> None:
         except Exception as ex:
             print(f"  ERROR deploying KA {agent_id}: {ex}")
             # traceback.print_exc()
-            update_row_status(
+            update_row_deploy_result(
                 spark, status_table_name, run_id, agent_id,
                 "Failed", str(ex),
             )

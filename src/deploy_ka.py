@@ -19,7 +19,6 @@ import argparse
 import json
 import os
 import sys
-import time
 
 from databricks.sdk import WorkspaceClient
 
@@ -134,88 +133,6 @@ def deploy_knowledge_sources(
         ka_api_call(w, "POST", f"{parent}/knowledge-sources", body=body)
 
 
-def wait_for_ka_ready(w: WorkspaceClient, ka_name: str, max_wait: int = 300, poll_interval: int = 30) -> dict:
-    """Wait for both KA state=ACTIVE and serving endpoint state=READY.
-
-    The examples API hangs if the KA is still in CREATING state, even
-    when the serving endpoint is READY. Both must be ready.
-
-    Returns a dict with keys: ready (bool), endpoint_name, ka_state,
-    endpoint_state, wait_seconds, attempts.
-    """
-    ka_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
-    short_id = ka_id.split("-")[0]
-    endpoint_name = f"ka-{short_id}-endpoint"
-
-    elapsed = 0
-    attempts = 0
-    ka_state = None
-    ep_state = None
-
-    while elapsed < max_wait:
-        attempts += 1
-
-        # Check KA state
-        try:
-            ka_resp = ka_api_call(w, "GET", f"knowledge-assistants/{ka_id}")
-            ka_state = ka_resp.get("state", "UNKNOWN")
-        except Exception:
-            ka_state = "UNKNOWN"
-
-        # Check endpoint state
-        try:
-            ep = w.serving_endpoints.get(endpoint_name)
-            ep_state = ep.state.ready.value if ep.state and ep.state.ready else "NOT_READY"
-        except Exception:
-            ep_state = "NOT_FOUND"
-
-        if ka_state == "ACTIVE" and ep_state == "READY":
-            print(f"  KA ACTIVE, endpoint '{endpoint_name}' READY (waited {elapsed}s, {attempts} check(s))")
-            return {"ready": True, "endpoint_name": endpoint_name, "ka_state": ka_state,
-                    "endpoint_state": ep_state, "wait_seconds": elapsed, "attempts": attempts}
-
-        print(f"  KA state: {ka_state}, endpoint: {ep_state}, waiting {poll_interval}s (attempt {attempts})...")
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-
-    print(f"  Not ready after {max_wait}s: KA={ka_state}, endpoint={ep_state} ({attempts} attempts)")
-    return {"ready": False, "endpoint_name": endpoint_name, "ka_state": ka_state,
-            "endpoint_state": ep_state, "wait_seconds": elapsed, "attempts": attempts}
-
-
-def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list) -> str:
-    """Create examples for the assistant after endpoint is ready.
-
-    Returns a status description string for the status table.
-    """
-    if not examples:
-        return "No examples to deploy"
-
-    ep_result = wait_for_ka_ready(w, ka_name)
-
-    if not ep_result["ready"]:
-        return (f"Examples skipped: KA={ep_result['ka_state']}, endpoint={ep_result['endpoint_state']} "
-                f"after {ep_result['wait_seconds']}s ({ep_result['attempts']} attempts)")
-
-    parent = ka_name
-    added = 0
-
-    for ex in examples:
-        try:
-            ka_api_call(w, "POST", f"{parent}/examples", body={
-                "question": ex.get("question", ""),
-                "guidelines": ex.get("guidelines", []),
-            })
-            added += 1
-        except Exception as e:
-            print(f"  Warning: could not add example: {e}")
-
-    msg = (f"Added {added}/{len(examples)} example(s). "
-           f"KA ACTIVE, endpoint READY after {ep_result['wait_seconds']}s ({ep_result['attempts']} check(s))")
-    print(f"  {msg}")
-    return msg
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -263,17 +180,16 @@ def main() -> None:
     else:
         print("Skipping sync (index-based sources don't require it)")
 
-    # 4. Deploy examples (best-effort — may fail if endpoint not ready yet)
-    print("Deploying examples ...")
-    deploy_examples(w, ka_name, config.get("examples", []))
-
     ka_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
     host = w.config.host.rstrip("/")
     ui_link = f"{host}/ml/bricks/ka/configure/{ka_id}"
+    example_count = len(config.get("examples", []))
     if has_file_sources:
         print(f"KA created. File source sync in progress — check status: {ui_link}")
     else:
         print(f"KA created. Index sources attached. View: {ui_link}")
+    if example_count > 0:
+        print(f"  {example_count} example(s) in config — run the Copy KA Examples job to copy them.")
 
 
 if __name__ == "__main__":

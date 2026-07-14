@@ -45,3 +45,43 @@ resources:
               source_client_id: "{{job.parameters.source_client_id}}"
               source_client_secret: "{{job.parameters.source_client_secret}}"
           environment_key: default
+
+    copy_examples_job:
+      name: "Copy KA Examples"
+      parameters:
+        - name: catalog
+          default: ${var.target_catalog}
+        - name: schema
+          default: ${var.target_schema}
+        - name: status_table_name
+          default: ${var.status_table_name}
+        - name: source_host
+          default: ${var.source_host}
+        - name: source_token
+          default: ${var.source_token}
+        - name: source_client_id
+          default: ${var.source_client_id}
+        - name: source_client_secret
+          default: ${var.source_client_secret}
+        - name: run_id
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - databricks-sdk>=0.40.0
+      tasks:
+        - task_key: copy_examples
+          notebook_task:
+            notebook_path: ./src/copy_examples.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              status_table_name: "{{job.parameters.status_table_name}}"
+              source_host: "{{job.parameters.source_host}}"
+              source_token: "{{job.parameters.source_token}}"
+              source_client_id: "{{job.parameters.source_client_id}}"
+              source_client_secret: "{{job.parameters.source_client_secret}}"
+              run_id: "{{job.parameters.run_id}}"
+          environment_key: default
