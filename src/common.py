@@ -353,6 +353,11 @@ def init_deployment_table(
         spark.sql(
             f"""
             INSERT INTO {table_name}
+            (run_id, job_id, job_run_id, agent_type, agent_id,
+             target_ka_name, source_example_count, source_host, target_host,
+             target_catalog, target_schema, display_name_override, skip_tests,
+             status, status_desc, test_status, test_status_desc,
+             created_at, started_at, completed_at, updated_at)
             VALUES (
                 '{run_id}',
                 '{job_id}',
@@ -507,6 +512,11 @@ def insert_examples_row(
     spark.sql(
         f"""
         INSERT INTO {table_name}
+        (run_id, job_id, job_run_id, agent_id, target_ka_name,
+         display_name, source_host, target_host,
+         source_example_count, target_example_count,
+         copy_status, copy_details,
+         created_at, copied_at, updated_at)
         VALUES (
             '{run_id}',
             '{job_id}',
