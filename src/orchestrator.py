@@ -163,8 +163,8 @@ def _deploy_single_ka(
     if copy_volumes and file_sources:
         for src in file_sources:
             if _is_same_volume_path(source_client, target_client, src["files_path"], catalog, schema):
-                print(f"  Skipping copy (same workspace and path): {src['files_path']}")
-                status_parts.append(f"Volume copy skipped (same path): {src['files_path']}")
+                print(f"  Volume copy skipped (same workspace and path): {src['files_path']}")
+                status_parts.append(f"Volume copy skipped (same workspace and path): {src['files_path']}")
             else:
                 print(f"  Copying volume files for: {src['files_path']}")
                 result = copy_volume_files(
