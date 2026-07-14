@@ -3,7 +3,7 @@ bundle:
 
 include:
   - variables.yml
-  # Compute switch: change to job_serverless.yml for serverless computeeee
+  # Compute switch: change to job_serverless.yml for serverless computeeeee
   - job_serverless.yml
 
 # Workspace host per target:
