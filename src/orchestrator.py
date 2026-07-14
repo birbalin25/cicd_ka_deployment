@@ -337,7 +337,7 @@ def main() -> None:
 
         except Exception as ex:
             print(f"  ERROR deploying KA {agent_id}: {ex}")
-            traceback.print_exc()
+            # traceback.print_exc()
             update_row_status(
                 spark, status_table_name, run_id, agent_id,
                 "Failed", str(ex),
