@@ -488,8 +488,6 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     target_example_count INT,
     copy_status STRING,
     copy_details STRING,
-    created_at TIMESTAMP,
-    copied_at TIMESTAMP,
     updated_at TIMESTAMP
 )
 """
@@ -521,7 +519,7 @@ def insert_examples_row(
          display_name, source_host, target_host,
          source_example_count, target_example_count,
          copy_status, copy_details,
-         created_at, copied_at, updated_at)
+         updated_at)
         VALUES (
             '{run_id}',
             '{job_id}',
@@ -535,8 +533,6 @@ def insert_examples_row(
             0,
             'Pending',
             '',
-            current_timestamp(),
-            NULL,
             current_timestamp()
         )
         """
@@ -551,17 +547,14 @@ def update_examples_copy(
     copy_status: str,
     copy_details: str,
     target_example_count: int = 0,
-    set_copied_at: bool = False,
 ) -> None:
     """Update the copy result for an examples row."""
-    copied_at_clause = "copied_at = current_timestamp()," if set_copied_at else ""
     spark.sql(
         f"""
         UPDATE {table_name}
         SET copy_status = '{copy_status}',
             copy_details = '{_escape_sql(copy_details)}',
             target_example_count = {target_example_count},
-            {copied_at_clause}
             updated_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """

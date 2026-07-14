@@ -284,7 +284,6 @@ def main() -> None:
                 spark, examples_table, run_id_filter, agent_id,
                 status, msg,
                 target_example_count=target_count,
-                set_copied_at=True,
             )
             copied_count += 1 if status == "Copied" else 0
 
