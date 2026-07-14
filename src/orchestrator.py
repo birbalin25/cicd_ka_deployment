@@ -302,6 +302,16 @@ def main() -> None:
         copy_volumes = row.get("copy_volumes", "").strip().lower() == "true"
         replace_ka = row.get("replace_KA", "").strip().lower() == "true"
 
+        # Fetch source KA info early so it's available for all paths
+        src_display_name = ""
+        source_example_count = 0
+        try:
+            src_config = export_knowledge_assistant(source_client, agent_id)
+            src_display_name = src_config.get("display_name", "")
+            source_example_count = len(src_config.get("examples", []))
+        except Exception:
+            pass
+
         if not replace_ka:
             skip_msg = (
                 f"Skipped — replace_KA is set to false in agents_input.csv. "
@@ -311,6 +321,8 @@ def main() -> None:
             update_row_deploy_result(
                 spark, status_table_name, run_id, agent_id,
                 "Skipped", skip_msg,
+                source_display_name=src_display_name,
+                source_example_count=source_example_count,
             )
             update_row_test_status(
                 spark, status_table_name, run_id, agent_id,
@@ -322,7 +334,7 @@ def main() -> None:
         update_row_deploy_started(spark, status_table_name, run_id, agent_id)
 
         try:
-            ka_name, status_msg, example_count, src_display_name = _deploy_single_ka(
+            ka_name, status_msg, example_count, deploy_display_name = _deploy_single_ka(
                 source_client, target_client,
                 agent_id, row_catalog, row_schema,
                 display_override,
@@ -334,7 +346,7 @@ def main() -> None:
                 spark, status_table_name, run_id, agent_id,
                 "Success", status_msg,
                 target_ka_name=ka_name,
-                source_display_name=src_display_name,
+                source_display_name=deploy_display_name or src_display_name,
                 source_example_count=example_count,
             )
 
@@ -357,6 +369,8 @@ def main() -> None:
             update_row_deploy_result(
                 spark, status_table_name, run_id, agent_id,
                 "Failed", str(ex),
+                source_display_name=src_display_name,
+                source_example_count=source_example_count,
             )
             update_row_test_status(
                 spark, status_table_name, run_id, agent_id,
