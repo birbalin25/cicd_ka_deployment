@@ -8,6 +8,7 @@ across KA and Supervisor agent deployment workflows.
 import csv
 import io
 import os
+import time
 from datetime import datetime, timezone
 
 from databricks.sdk.service.catalog import VolumeType
@@ -39,22 +40,20 @@ def ka_api_call(w, method, path, body=None):
     host = w.config.host
     cached = _ka_api_versions.get(host)
 
-    if cached == "2.0":
-        return w.api_client.do(method, f"/api/2.0/{path}", body=body)
+    # Some sub-endpoints only exist on one version, so always try both
+    # with fallback. The cache just decides which to try first.
+    first, second = ("2.0", "2.1") if cached == "2.0" else ("2.1", "2.0")
 
     try:
-        result = w.api_client.do(method, f"/api/2.1/{path}", body=body)
-        _ka_api_versions[host] = "2.1"
+        result = w.api_client.do(method, f"/api/{first}/{path}", body=body)
+        _ka_api_versions[host] = first
         return result
-    except Exception as e21:
+    except Exception as e_first:
         try:
-            result = w.api_client.do(method, f"/api/2.0/{path}", body=body)
-            _ka_api_versions[host] = "2.0"
+            result = w.api_client.do(method, f"/api/{second}/{path}", body=body)
             return result
         except Exception:
-            # Both versions failed — raise the 2.1 error (more likely
-            # to contain the real problem, e.g. missing volume)
-            raise e21
+            raise e_first
 
 
 # ---------------------------------------------------------------------------
@@ -152,18 +151,23 @@ def copy_volume_files(source_client, target_client, source_path, target_catalog,
     target_path = remap_volume_path(source_path, target_catalog, target_schema)
 
     # List files in source path, download and upload each
+    file_count = 0
+    t0 = time.time()
     for file_info in source_client.files.list_directory_contents(source_path):
         if file_info.is_directory:
             continue
         src_file_path = file_info.path
-        # Compute corresponding target file path
         relative = src_file_path[len(source_path):]
         tgt_file_path = target_path + relative
 
         resp = source_client.files.download(src_file_path)
         content = resp.contents.read()
         target_client.files.upload(tgt_file_path, io.BytesIO(content), overwrite=True)
+        file_count += 1
         print(f"    Copied: {src_file_path} → {tgt_file_path}")
+
+    elapsed = round(time.time() - t0, 1)
+    return {"file_count": file_count, "elapsed_seconds": elapsed, "target_path": target_path}
 
 
 # ---------------------------------------------------------------------------

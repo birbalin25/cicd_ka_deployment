@@ -134,10 +134,14 @@ def deploy_knowledge_sources(
         ka_api_call(w, "POST", f"{parent}/knowledge-sources", body=body)
 
 
-def wait_for_endpoint(w: WorkspaceClient, ka_name: str, max_wait: int = 300, poll_interval: int = 30) -> dict:
-    """Wait for the KA serving endpoint to reach READY state.
+def wait_for_ka_ready(w: WorkspaceClient, ka_name: str, max_wait: int = 300, poll_interval: int = 30) -> dict:
+    """Wait for both KA state=ACTIVE and serving endpoint state=READY.
 
-    Returns a dict with keys: ready (bool), endpoint_name, wait_seconds, attempts.
+    The examples API hangs if the KA is still in CREATING state, even
+    when the serving endpoint is READY. Both must be ready.
+
+    Returns a dict with keys: ready (bool), endpoint_name, ka_state,
+    endpoint_state, wait_seconds, attempts.
     """
     ka_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
     short_id = ka_id.split("-")[0]
@@ -145,24 +149,38 @@ def wait_for_endpoint(w: WorkspaceClient, ka_name: str, max_wait: int = 300, pol
 
     elapsed = 0
     attempts = 0
+    ka_state = None
+    ep_state = None
 
     while elapsed < max_wait:
         attempts += 1
+
+        # Check KA state
+        try:
+            ka_resp = ka_api_call(w, "GET", f"knowledge-assistants/{ka_id}")
+            ka_state = ka_resp.get("state", "UNKNOWN")
+        except Exception:
+            ka_state = "UNKNOWN"
+
+        # Check endpoint state
         try:
             ep = w.serving_endpoints.get(endpoint_name)
-            state = ep.state.ready.value if ep.state and ep.state.ready else None
-            if state == "READY":
-                print(f"  Endpoint '{endpoint_name}' is READY (waited {elapsed}s, {attempts} check(s))")
-                return {"ready": True, "endpoint_name": endpoint_name, "wait_seconds": elapsed, "attempts": attempts}
-            print(f"  Endpoint '{endpoint_name}' state: {state}, waiting {poll_interval}s (attempt {attempts})...")
+            ep_state = ep.state.ready.value if ep.state and ep.state.ready else "NOT_READY"
         except Exception:
-            print(f"  Endpoint '{endpoint_name}' not found yet, waiting {poll_interval}s (attempt {attempts})...")
+            ep_state = "NOT_FOUND"
 
+        if ka_state == "ACTIVE" and ep_state == "READY":
+            print(f"  KA ACTIVE, endpoint '{endpoint_name}' READY (waited {elapsed}s, {attempts} check(s))")
+            return {"ready": True, "endpoint_name": endpoint_name, "ka_state": ka_state,
+                    "endpoint_state": ep_state, "wait_seconds": elapsed, "attempts": attempts}
+
+        print(f"  KA state: {ka_state}, endpoint: {ep_state}, waiting {poll_interval}s (attempt {attempts})...")
         time.sleep(poll_interval)
         elapsed += poll_interval
 
-    print(f"  Endpoint '{endpoint_name}' not ready after {max_wait}s ({attempts} attempts)")
-    return {"ready": False, "endpoint_name": endpoint_name, "wait_seconds": elapsed, "attempts": attempts}
+    print(f"  Not ready after {max_wait}s: KA={ka_state}, endpoint={ep_state} ({attempts} attempts)")
+    return {"ready": False, "endpoint_name": endpoint_name, "ka_state": ka_state,
+            "endpoint_state": ep_state, "wait_seconds": elapsed, "attempts": attempts}
 
 
 def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list) -> str:
@@ -173,10 +191,10 @@ def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list) -> str:
     if not examples:
         return "No examples to deploy"
 
-    ep_result = wait_for_endpoint(w, ka_name)
+    ep_result = wait_for_ka_ready(w, ka_name)
 
     if not ep_result["ready"]:
-        return (f"Examples skipped: endpoint '{ep_result['endpoint_name']}' not ready "
+        return (f"Examples skipped: KA={ep_result['ka_state']}, endpoint={ep_result['endpoint_state']} "
                 f"after {ep_result['wait_seconds']}s ({ep_result['attempts']} attempts)")
 
     parent = ka_name
@@ -193,7 +211,7 @@ def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list) -> str:
             print(f"  Warning: could not add example: {e}")
 
     msg = (f"Added {added}/{len(examples)} example(s). "
-           f"Endpoint ready after {ep_result['wait_seconds']}s ({ep_result['attempts']} check(s))")
+           f"KA ACTIVE, endpoint READY after {ep_result['wait_seconds']}s ({ep_result['attempts']} check(s))")
     print(f"  {msg}")
     return msg
 

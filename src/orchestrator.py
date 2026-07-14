@@ -206,12 +206,14 @@ def _deploy_single_ka(
                 status_parts.append(f"Volume copy skipped (same path): {src['files_path']}")
             else:
                 print(f"  Copying volume files for: {src['files_path']}")
-                copy_volume_files(
+                result = copy_volume_files(
                     source_client, target_client,
                     src["files_path"], catalog, schema,
                 )
-                target_path = remap_volume_path(src["files_path"], catalog, schema)
-                status_parts.append(f"Volume copied: {src['files_path']} -> {target_path}")
+                status_parts.append(
+                    f"Volume copied: {result['file_count']} file(s) in {result['elapsed_seconds']}s, "
+                    f"{src['files_path']} -> {result['target_path']}"
+                )
     elif file_sources:
         for src in file_sources:
             target_path = remap_volume_path(src["files_path"], catalog, schema)
