@@ -341,6 +341,10 @@ def main() -> None:
                 spark, status_table_name, run_id, agent_id,
                 "Failed", str(ex),
             )
+            update_row_test_status(
+                spark, status_table_name, run_id, agent_id,
+                "N/A", "Deploy failed — tests not applicable",
+            )
             continue
 
     # Print summary from Delta table

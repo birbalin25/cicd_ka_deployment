@@ -25,8 +25,9 @@ from common import ka_api_call, timestamp_now
 def _test_ka_exists(w: WorkspaceClient, agent_id: str) -> tuple[bool, str]:
     """Verify the KA exists via REST API."""
     try:
-        ka_api_call(w, "GET", f"knowledge_assistants/{agent_id}")
-        return True, ""
+        resp = ka_api_call(w, "GET", f"knowledge_assistants/{agent_id}")
+        state = resp.get("state", "unknown")
+        return True, f"KA exists (state={state})"
     except Exception as ex:
         return False, f"verify_exists failed: {ex}"
 
@@ -38,7 +39,7 @@ def _test_ka_sources(w: WorkspaceClient, agent_id: str) -> tuple[bool, str]:
         sources = resp.get("knowledge_sources", [])
         if len(sources) == 0:
             return False, "verify_sources: no knowledge sources found"
-        return True, ""
+        return True, f"{len(sources)} knowledge source(s) attached"
     except Exception as ex:
         return False, f"verify_sources failed: {ex}"
 
@@ -51,7 +52,8 @@ def _test_ka_endpoint(w: WorkspaceClient, agent_id: str) -> tuple[bool, str]:
         ep = w.serving_endpoints.get(endpoint_name)
         if ep is None:
             return False, f"verify_endpoint: endpoint '{endpoint_name}' not found"
-        return True, ""
+        ep_state = ep.state.ready.value if ep.state and ep.state.ready else "unknown"
+        return True, f"endpoint '{endpoint_name}' exists (state={ep_state})"
     except Exception as ex:
         return False, f"verify_endpoint failed: {ex}"
 
@@ -75,7 +77,8 @@ def run_tests(w: WorkspaceClient, agent_type: str, agent_id: str) -> dict:
             "status_desc": f"Unsupported agent_type: {agent_type}",
         }
 
-    errors = []
+    details = []
+    all_passed = True
     checks = [
         _test_ka_exists,
         _test_ka_sources,
@@ -83,16 +86,17 @@ def run_tests(w: WorkspaceClient, agent_type: str, agent_id: str) -> dict:
     ]
 
     for check_fn in checks:
-        passed, err = check_fn(w, agent_id)
+        passed, msg = check_fn(w, agent_id)
+        details.append(msg)
         if not passed:
-            errors.append(err)
+            all_passed = False
 
     return {
         "agent_type": agent_type,
         "agent_id": agent_id,
-        "test_status": "Pass" if not errors else "Fail",
+        "test_status": "Pass" if all_passed else "Fail",
         "timestamp": timestamp_now(),
-        "status_desc": "; ".join(errors),
+        "status_desc": "; ".join(details),
     }
 
 
