@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from databricks.sdk import WorkspaceClient
 
@@ -133,29 +134,42 @@ def deploy_knowledge_sources(
         ka_api_call(w, "POST", f"{parent}/knowledge-sources", body=body)
 
 
-def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list):
-    """Create examples for the assistant (best-effort).
+def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list, max_retries: int = 6, retry_delay: int = 30):
+    """Create examples for the assistant.
 
-    If the KA endpoint isn't ready yet, examples will fail — log a
-    warning so the user knows to add them manually or re-run later.
+    Retries if the endpoint isn't ready yet (waits up to max_retries *
+    retry_delay seconds for the endpoint to provision).
     """
     if not examples:
         return
 
     parent = ka_name
-    added = 0
 
-    for ex in examples:
-        try:
-            ka_api_call(w, "POST", f"{parent}/examples", body={
-                "question": ex.get("question", ""),
-                "guidelines": ex.get("guidelines", []),
-            })
-            added += 1
-        except Exception as e:
-            print(f"  Warning: could not add example (endpoint may not be ready yet): {e}")
-            print("  Remaining examples can be added once the endpoint is online.")
-            break
+    for attempt in range(max_retries):
+        added = 0
+        failed = False
+
+        for ex in examples:
+            try:
+                ka_api_call(w, "POST", f"{parent}/examples", body={
+                    "question": ex.get("question", ""),
+                    "guidelines": ex.get("guidelines", []),
+                })
+                added += 1
+            except Exception as e:
+                failed = True
+                if attempt < max_retries - 1:
+                    print(f"  Endpoint not ready, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(retry_delay)
+                    break
+                else:
+                    print(f"  Warning: could not add examples after {max_retries} attempts: {e}")
+                    print("  Add examples manually once the endpoint is online.")
+                    break
+
+        if not failed:
+            print(f"  Added {added}/{len(examples)} example(s)")
+            return
 
     print(f"  Added {added}/{len(examples)} example(s)")
 
