@@ -146,6 +146,16 @@ def _build_source_client(
 # Single-agent deployment wrapper
 # ---------------------------------------------------------------------------
 
+def _is_same_volume_path(source_client, target_client, source_path, catalog, schema):
+    """Check if source and target volume paths resolve to the same location."""
+    source_host = source_client.config.host.rstrip("/")
+    target_host = target_client.config.host.rstrip("/")
+    if source_host != target_host:
+        return False
+    target_path = remap_volume_path(source_path, catalog, schema)
+    return source_path.rstrip("/") == target_path.rstrip("/")
+
+
 def _deploy_single_ka(
     source_client: WorkspaceClient,
     target_client: WorkspaceClient,
@@ -157,8 +167,10 @@ def _deploy_single_ka(
 ) -> tuple[str, str]:
     """Export and deploy a single KA.
 
-    Returns (ka_name, status_message).
+    Returns (ka_name, status_description).
     """
+    status_parts = []
+
     # Export from source
     config = export_knowledge_assistant(source_client, agent_id)
 
@@ -187,18 +199,23 @@ def _deploy_single_ka(
             )
 
     # Check file-based sources: copy or verify volumes exist
-    if copy_volumes:
+    if copy_volumes and file_sources:
         for src in file_sources:
-            print(f"  Copying volume files for: {src['files_path']}")
-            copy_volume_files(
-                source_client, target_client,
-                src["files_path"], catalog, schema,
-            )
+            if _is_same_volume_path(source_client, target_client, src["files_path"], catalog, schema):
+                print(f"  Skipping copy (same workspace and path): {src['files_path']}")
+                status_parts.append(f"Volume copy skipped (same path): {src['files_path']}")
+            else:
+                print(f"  Copying volume files for: {src['files_path']}")
+                copy_volume_files(
+                    source_client, target_client,
+                    src["files_path"], catalog, schema,
+                )
+                target_path = remap_volume_path(src["files_path"], catalog, schema)
+                status_parts.append(f"Volume copied: {src['files_path']} -> {target_path}")
     elif file_sources:
         for src in file_sources:
             target_path = remap_volume_path(src["files_path"], catalog, schema)
             parts = target_path.strip("/").split("/")
-            # parts = ["Volumes", catalog, schema, volume_name, ...]
             vol_catalog, vol_schema, vol_name = parts[1], parts[2], parts[3]
             try:
                 target_client.volumes.read(
@@ -217,12 +234,14 @@ def _deploy_single_ka(
     ka_name = deploy_ka_assistant(target_client, config)
     ka_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
     print(f"  KA deployed: {ka_name}")
+    status_parts.append(f"KA created: {config['display_name']}")
 
     deploy_knowledge_sources(
         target_client, ka_name,
         config.get("knowledge_sources", []),
         catalog, schema,
     )
+    status_parts.append(f"Knowledge sources: {len(config.get('knowledge_sources', []))}")
 
     # Sync file-based sources (fire and forget — don't wait)
     has_file_sources = any(
@@ -231,20 +250,22 @@ def _deploy_single_ka(
     if has_file_sources:
         ka_api_call(target_client, "POST", f"{ka_name}/knowledge-sources:sync")
         print("  File source sync triggered (running in background).")
+        status_parts.append("File sync: triggered (background)")
 
-    # Best-effort examples (may fail if endpoint not ready yet)
-    deploy_ka_examples(target_client, ka_name, config.get("examples", []))
+    # Deploy examples — only wait for endpoint if examples exist
+    examples = config.get("examples", [])
+    if examples:
+        examples_msg = deploy_ka_examples(target_client, ka_name, examples)
+        status_parts.append(examples_msg)
+    else:
+        status_parts.append("Examples: none in source")
 
-    # Build UI link and status message
+    # Build UI link
     host = target_client.config.host.rstrip("/")
     ui_link = f"{host}/ml/bricks/ka/configure/{ka_id}"
-    if has_file_sources:
-        status_msg = (
-            f"KA created. File source sync in progress — check status: {ui_link}"
-        )
-    else:
-        status_msg = f"KA created. Index sources attached. View: {ui_link}"
+    status_parts.append(f"UI: {ui_link}")
 
+    status_msg = " | ".join(status_parts)
     print(f"  {status_msg}")
     return ka_name, status_msg
 
@@ -328,7 +349,7 @@ def main() -> None:
                 update_row_test_status(
                     spark, status_table_name, run_id, agent_id,
                     result["test_status"],
-                    result.get("error_details", ""),
+                    result.get("status_desc", ""),
                 )
             else:
                 update_row_test_status(

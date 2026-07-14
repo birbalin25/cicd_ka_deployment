@@ -64,7 +64,7 @@ def run_tests(w: WorkspaceClient, agent_type: str, agent_id: str) -> dict:
     """Run all verification tests for a deployed KA.
 
     Returns a dict with keys: agent_type, agent_id, test_status,
-    timestamp, error_details.
+    timestamp, status_desc.
     """
     if agent_type.upper() != "KA":
         return {
@@ -72,7 +72,7 @@ def run_tests(w: WorkspaceClient, agent_type: str, agent_id: str) -> dict:
             "agent_id": agent_id,
             "test_status": "Skipped",
             "timestamp": timestamp_now(),
-            "error_details": f"Unsupported agent_type: {agent_type}",
+            "status_desc": f"Unsupported agent_type: {agent_type}",
         }
 
     errors = []
@@ -92,7 +92,7 @@ def run_tests(w: WorkspaceClient, agent_type: str, agent_id: str) -> dict:
         "agent_id": agent_id,
         "test_status": "Pass" if not errors else "Fail",
         "timestamp": timestamp_now(),
-        "error_details": "; ".join(errors),
+        "status_desc": "; ".join(errors),
     }
 
 
@@ -109,8 +109,8 @@ def main() -> None:
     result = run_tests(w, "KA", args.agent_id)
 
     print(f"Test result: {result['test_status']}")
-    if result["error_details"]:
-        print(f"  Errors: {result['error_details']}")
+    if result["status_desc"]:
+        print(f"  Errors: {result['status_desc']}")
 
 
 if __name__ == "__main__":

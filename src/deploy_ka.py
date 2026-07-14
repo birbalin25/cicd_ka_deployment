@@ -134,44 +134,68 @@ def deploy_knowledge_sources(
         ka_api_call(w, "POST", f"{parent}/knowledge-sources", body=body)
 
 
-def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list, max_retries: int = 6, retry_delay: int = 30):
-    """Create examples for the assistant.
+def wait_for_endpoint(w: WorkspaceClient, ka_name: str, max_wait: int = 300, poll_interval: int = 30) -> dict:
+    """Wait for the KA serving endpoint to reach READY state.
 
-    Retries if the endpoint isn't ready yet (waits up to max_retries *
-    retry_delay seconds for the endpoint to provision).
+    Returns a dict with keys: ready (bool), endpoint_name, wait_seconds, attempts.
+    """
+    ka_id = ka_name.split("/")[-1] if "/" in ka_name else ka_name
+    short_id = ka_id.split("-")[0]
+    endpoint_name = f"ka-{short_id}-endpoint"
+
+    elapsed = 0
+    attempts = 0
+
+    while elapsed < max_wait:
+        attempts += 1
+        try:
+            ep = w.serving_endpoints.get(endpoint_name)
+            state = ep.state.ready.value if ep.state and ep.state.ready else None
+            if state == "READY":
+                print(f"  Endpoint '{endpoint_name}' is READY (waited {elapsed}s, {attempts} check(s))")
+                return {"ready": True, "endpoint_name": endpoint_name, "wait_seconds": elapsed, "attempts": attempts}
+            print(f"  Endpoint '{endpoint_name}' state: {state}, waiting {poll_interval}s (attempt {attempts})...")
+        except Exception:
+            print(f"  Endpoint '{endpoint_name}' not found yet, waiting {poll_interval}s (attempt {attempts})...")
+
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+    print(f"  Endpoint '{endpoint_name}' not ready after {max_wait}s ({attempts} attempts)")
+    return {"ready": False, "endpoint_name": endpoint_name, "wait_seconds": elapsed, "attempts": attempts}
+
+
+def deploy_examples(w: WorkspaceClient, ka_name: str, examples: list) -> str:
+    """Create examples for the assistant after endpoint is ready.
+
+    Returns a status description string for the status table.
     """
     if not examples:
-        return
+        return "No examples to deploy"
+
+    ep_result = wait_for_endpoint(w, ka_name)
+
+    if not ep_result["ready"]:
+        return (f"Examples skipped: endpoint '{ep_result['endpoint_name']}' not ready "
+                f"after {ep_result['wait_seconds']}s ({ep_result['attempts']} attempts)")
 
     parent = ka_name
+    added = 0
 
-    for attempt in range(max_retries):
-        added = 0
-        failed = False
+    for ex in examples:
+        try:
+            ka_api_call(w, "POST", f"{parent}/examples", body={
+                "question": ex.get("question", ""),
+                "guidelines": ex.get("guidelines", []),
+            })
+            added += 1
+        except Exception as e:
+            print(f"  Warning: could not add example: {e}")
 
-        for ex in examples:
-            try:
-                ka_api_call(w, "POST", f"{parent}/examples", body={
-                    "question": ex.get("question", ""),
-                    "guidelines": ex.get("guidelines", []),
-                })
-                added += 1
-            except Exception as e:
-                failed = True
-                if attempt < max_retries - 1:
-                    print(f"  Endpoint not ready, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
-                    time.sleep(retry_delay)
-                    break
-                else:
-                    print(f"  Warning: could not add examples after {max_retries} attempts: {e}")
-                    print("  Add examples manually once the endpoint is online.")
-                    break
-
-        if not failed:
-            print(f"  Added {added}/{len(examples)} example(s)")
-            return
-
-    print(f"  Added {added}/{len(examples)} example(s)")
+    msg = (f"Added {added}/{len(examples)} example(s). "
+           f"Endpoint ready after {ep_result['wait_seconds']}s ({ep_result['attempts']} check(s))")
+    print(f"  {msg}")
+    return msg
 
 
 # ---------------------------------------------------------------------------

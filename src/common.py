@@ -214,9 +214,9 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     display_name_override STRING,
     skip_tests STRING,
     status STRING,
-    error_details STRING,
+    status_desc STRING,
     test_status STRING,
-    test_error_details STRING,
+    test_status_desc STRING,
     updated_at TIMESTAMP
 )
 """
@@ -232,6 +232,16 @@ def init_deployment_table(
 ) -> None:
     """Create the status table (if needed) and insert Pending rows."""
     spark.sql(_CREATE_TABLE_SQL.format(table_name=table_name))
+
+    # Migrate old column names if table existed before the rename
+    try:
+        cols = [c.name for c in spark.table(table_name).schema]
+        if "error_details" in cols and "status_desc" not in cols:
+            spark.sql(f"ALTER TABLE {table_name} RENAME COLUMN error_details TO status_desc")
+        if "test_error_details" in cols and "test_status_desc" not in cols:
+            spark.sql(f"ALTER TABLE {table_name} RENAME COLUMN test_error_details TO test_status_desc")
+    except Exception:
+        pass
 
     for row in rows:
         target_catalog = row.get("target_catalog", "").strip() or default_catalog
@@ -266,15 +276,15 @@ def update_row_status(
     run_id: str,
     agent_id: str,
     status: str,
-    error_details: str = "",
+    status_desc: str = "",
 ) -> None:
     """Update the deployment status for a single row."""
-    escaped_error = error_details.replace("'", "\\'")
+    escaped_error = status_desc.replace("'", "\\'")
     spark.sql(
         f"""
         UPDATE {table_name}
         SET status = '{status}',
-            error_details = '{escaped_error}',
+            status_desc = '{escaped_error}',
             updated_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
@@ -287,15 +297,15 @@ def update_row_test_status(
     run_id: str,
     agent_id: str,
     test_status: str,
-    test_error_details: str = "",
+    test_status_desc: str = "",
 ) -> None:
     """Update the test status for a single row."""
-    escaped_error = test_error_details.replace("'", "\\'")
+    escaped_error = test_status_desc.replace("'", "\\'")
     spark.sql(
         f"""
         UPDATE {table_name}
         SET test_status = '{test_status}',
-            test_error_details = '{escaped_error}',
+            test_status_desc = '{escaped_error}',
             updated_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
