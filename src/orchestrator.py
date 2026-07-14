@@ -300,6 +300,23 @@ def main() -> None:
         display_override = row.get("display_name_override", "").strip() or None
         skip_tests = row.get("skip_tests", "").strip().lower() == "true"
         copy_volumes = row.get("copy_volumes", "").strip().lower() == "true"
+        replace_ka = row.get("replace_KA", "").strip().lower() == "true"
+
+        if not replace_ka:
+            skip_msg = (
+                f"Skipped — replace_KA is set to false in agents_input.csv. "
+                f"Existing KA on target workspace will not be replaced."
+            )
+            print(f"\nSkipping KA {agent_id}: {skip_msg}")
+            update_row_deploy_result(
+                spark, status_table_name, run_id, agent_id,
+                "Skipped", skip_msg,
+            )
+            update_row_test_status(
+                spark, status_table_name, run_id, agent_id,
+                "N/A", "Deploy skipped — tests not applicable",
+            )
+            continue
 
         print(f"\nDeploying KA {agent_id} ...")
         update_row_deploy_started(spark, status_table_name, run_id, agent_id)

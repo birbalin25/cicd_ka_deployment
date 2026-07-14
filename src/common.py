@@ -288,10 +288,8 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     status_desc STRING,
     test_status STRING,
     test_status_desc STRING,
-    created_at TIMESTAMP,
     started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    updated_at TIMESTAMP
+    completed_at TIMESTAMP
 )
 """
 
@@ -303,7 +301,6 @@ _DEPLOY_NEW_COLUMNS = [
     ("source_example_count", "INT"),
     ("source_host", "STRING"),
     ("target_host", "STRING"),
-    ("created_at", "TIMESTAMP"),
     ("started_at", "TIMESTAMP"),
     ("completed_at", "TIMESTAMP"),
 ]
@@ -359,7 +356,7 @@ def init_deployment_table(
              target_ka_name, source_display_name, source_example_count, source_host, target_host,
              target_catalog, target_schema, display_name_override, skip_tests,
              status, status_desc, test_status, test_status_desc,
-             created_at, started_at, completed_at, updated_at)
+             started_at, completed_at)
             VALUES (
                 '{run_id}',
                 '{job_id}',
@@ -379,10 +376,8 @@ def init_deployment_table(
                 '',
                 'Pending',
                 '',
-                current_timestamp(),
                 NULL,
-                NULL,
-                current_timestamp()
+                NULL
             )
             """
         )
@@ -401,8 +396,7 @@ def update_row_status(
         f"""
         UPDATE {table_name}
         SET status = '{status}',
-            status_desc = '{_escape_sql(status_desc)}',
-            updated_at = current_timestamp()
+            status_desc = '{_escape_sql(status_desc)}'
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )
@@ -416,8 +410,7 @@ def update_row_deploy_started(
         f"""
         UPDATE {table_name}
         SET status = 'Deploying',
-            started_at = current_timestamp(),
-            updated_at = current_timestamp()
+            started_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )
@@ -443,8 +436,7 @@ def update_row_deploy_result(
             target_ka_name = '{_escape_sql(target_ka_name)}',
             source_display_name = '{_escape_sql(source_display_name)}',
             source_example_count = {source_example_count},
-            completed_at = current_timestamp(),
-            updated_at = current_timestamp()
+            completed_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )
@@ -463,8 +455,7 @@ def update_row_test_status(
         f"""
         UPDATE {table_name}
         SET test_status = '{test_status}',
-            test_status_desc = '{_escape_sql(test_status_desc)}',
-            updated_at = current_timestamp()
+            test_status_desc = '{_escape_sql(test_status_desc)}'
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )
