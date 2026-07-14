@@ -22,7 +22,7 @@ variables:
     default: ""
   wait_and_copy_examples:
     description: "If true, deploy job waits for KA ACTIVE state and copies examples inline. If false, examples are deferred to the Copy KA Examples job."
-    default: "false"
+    default: "true"
   cluster_spark_version:
     description: "Spark version for classic compute (ignored when compute_type=serverless)"
     default: "15.4.x-scala2.12"
