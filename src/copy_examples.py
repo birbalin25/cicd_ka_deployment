@@ -36,6 +36,7 @@ from common import (
     insert_examples_row,
     ka_api_call,
     update_examples_copy,
+    update_row_copied_examples,
 )
 
 
@@ -160,19 +161,15 @@ def main() -> None:
 
     print(f"Processing run_id: {run_id_filter}")
 
-    # Find successfully deployed KAs with examples that haven't been copied
+    # Find KAs with examples pending copy
     candidates = spark.sql(
         f"""
-        SELECT d.run_id, d.agent_id, d.target_ka_name,
-               d.display_name_override, d.source_example_count,
-               d.source_host, d.target_host
-        FROM {deploy_table} d
-        LEFT ANTI JOIN {examples_table} e
-            ON d.run_id = e.run_id AND d.agent_id = e.agent_id
-            AND e.copy_status = 'Copied'
-        WHERE d.run_id = '{run_id_filter}'
-          AND d.status = 'Success'
-          AND d.source_example_count > 0
+        SELECT run_id, agent_id, target_ka_name,
+               display_name_override, source_example_count,
+               source_host, target_host
+        FROM {deploy_table}
+        WHERE run_id = '{run_id_filter}'
+          AND copied_examples = 'Pending'
         """
     ).collect()
 
@@ -285,7 +282,17 @@ def main() -> None:
                 status, msg,
                 target_example_count=target_count,
             )
-            copied_count += 1 if status == "Copied" else 0
+            if status == "Copied":
+                update_row_copied_examples(
+                    spark, deploy_table, run_id_filter, agent_id,
+                    f"Examples copied successfully. Job_id={job_id}, Job_run_id={job_run_id}",
+                )
+                copied_count += 1
+            else:
+                update_row_copied_examples(
+                    spark, deploy_table, run_id_filter, agent_id,
+                    f"Partial copy ({target_count}/{source_example_count}). Job_id={job_id}, Job_run_id={job_run_id}",
+                )
 
         except Exception as ex:
             msg = f"Error: {ex}"
@@ -293,6 +300,10 @@ def main() -> None:
             update_examples_copy(
                 spark, examples_table, run_id_filter, agent_id,
                 "Failed", msg,
+            )
+            update_row_copied_examples(
+                spark, deploy_table, run_id_filter, agent_id,
+                f"Failed: {ex}. Job_id={job_id}, Job_run_id={job_run_id}",
             )
             failed_count += 1
 

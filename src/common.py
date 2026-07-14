@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     status_desc STRING,
     test_status STRING,
     test_status_desc STRING,
+    copied_examples STRING,
     completed_at TIMESTAMP
 )
 """
@@ -313,6 +314,7 @@ _DEPLOY_NEW_COLUMNS = [
     ("source_example_count", "INT"),
     ("source_host", "STRING"),
     ("target_host", "STRING"),
+    ("copied_examples", "STRING"),
     ("completed_at", "TIMESTAMP"),
 ]
 
@@ -367,7 +369,7 @@ def init_deployment_table(
              target_ka_name, source_display_name, source_example_count, source_host, target_host,
              target_catalog, target_schema, display_name_override, skip_tests,
              status, status_desc, test_status, test_status_desc,
-             completed_at)
+             copied_examples, completed_at)
             VALUES (
                 '{run_id}',
                 '{job_id}',
@@ -387,6 +389,7 @@ def init_deployment_table(
                 '',
                 'Pending',
                 '',
+                'N/A',
                 NULL
             )
             """
@@ -437,6 +440,10 @@ def update_row_deploy_result(
     source_example_count: int = 0,
 ) -> None:
     """Update a row with final deploy result including target KA info."""
+    if status == "Success" and source_example_count > 0:
+        copied_examples = "Pending"
+    else:
+        copied_examples = "N/A"
     spark.sql(
         f"""
         UPDATE {table_name}
@@ -445,6 +452,7 @@ def update_row_deploy_result(
             target_ka_name = '{_escape_sql(target_ka_name)}',
             source_display_name = '{_escape_sql(source_display_name)}',
             source_example_count = {source_example_count},
+            copied_examples = '{copied_examples}',
             completed_at = current_timestamp()
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
@@ -465,6 +473,23 @@ def update_row_test_status(
         UPDATE {table_name}
         SET test_status = '{test_status}',
             test_status_desc = '{_escape_sql(test_status_desc)}'
+        WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
+        """
+    )
+
+
+def update_row_copied_examples(
+    spark,
+    table_name: str,
+    run_id: str,
+    agent_id: str,
+    copied_examples: str,
+) -> None:
+    """Update the copied_examples column in the deploy status table."""
+    spark.sql(
+        f"""
+        UPDATE {table_name}
+        SET copied_examples = '{_escape_sql(copied_examples)}'
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )
