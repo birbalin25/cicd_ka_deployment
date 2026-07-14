@@ -31,6 +31,7 @@ resources:
           new_cluster:
             spark_version: ${var.cluster_spark_version}
             node_type_id: ${var.cluster_node_type}
+            data_security_mode: SINGLE_USER
             num_workers: 0
             spark_conf:
               spark.master: "local[*]"
