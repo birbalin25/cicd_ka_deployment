@@ -301,7 +301,6 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     status_desc STRING,
     test_status STRING,
     test_status_desc STRING,
-    started_at TIMESTAMP,
     completed_at TIMESTAMP
 )
 """
@@ -314,7 +313,6 @@ _DEPLOY_NEW_COLUMNS = [
     ("source_example_count", "INT"),
     ("source_host", "STRING"),
     ("target_host", "STRING"),
-    ("started_at", "TIMESTAMP"),
     ("completed_at", "TIMESTAMP"),
 ]
 
@@ -369,7 +367,7 @@ def init_deployment_table(
              target_ka_name, source_display_name, source_example_count, source_host, target_host,
              target_catalog, target_schema, display_name_override, skip_tests,
              status, status_desc, test_status, test_status_desc,
-             started_at, completed_at)
+             completed_at)
             VALUES (
                 '{run_id}',
                 '{job_id}',
@@ -389,7 +387,6 @@ def init_deployment_table(
                 '',
                 'Pending',
                 '',
-                NULL,
                 NULL
             )
             """
@@ -418,12 +415,11 @@ def update_row_status(
 def update_row_deploy_started(
     spark, table_name: str, run_id: str, agent_id: str
 ) -> None:
-    """Mark a row as Deploying with started_at timestamp."""
+    """Mark a row as Deploying."""
     spark.sql(
         f"""
         UPDATE {table_name}
-        SET status = 'Deploying',
-            started_at = current_timestamp()
+        SET status = 'Deploying'
         WHERE run_id = '{run_id}' AND agent_id = '{agent_id}'
         """
     )

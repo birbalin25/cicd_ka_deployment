@@ -151,7 +151,7 @@ def main() -> None:
     run_id_filter = (params.get("run_id") or "").strip()
     if not run_id_filter:
         latest = spark.sql(
-            f"SELECT run_id FROM {deploy_table} ORDER BY created_at DESC LIMIT 1"
+            f"SELECT run_id FROM {deploy_table} ORDER BY completed_at DESC LIMIT 1"
         ).collect()
         if not latest:
             print("No rows found in deploy status table.")
