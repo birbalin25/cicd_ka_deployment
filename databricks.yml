@@ -4,7 +4,7 @@ bundle:
 include:
   - variables.yml
   # Compute switch: change to job_serverless.yml for serverless computee
-  - job_classic.yml
+  - job_serverless.yml
 
 # Workspace host per target:
 #   - For local CLI: uncomment and set 'host' below, or use a 'profile'
