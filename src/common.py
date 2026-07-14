@@ -78,8 +78,21 @@ def get_dbutils():
 def get_job_context() -> tuple[str, str]:
     """Return (job_id, job_run_id) from the Databricks job context.
 
-    Returns ("local", "local") when running outside a Databricks job.
+    Tries dbutils notebook context first (works on serverless and classic),
+    then falls back to Spark conf. Returns ("local", "local") when running
+    outside a Databricks job.
     """
+    dbutils = get_dbutils()
+    if dbutils is not None:
+        try:
+            ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+            job_id = ctx.jobId().get()
+            job_run_id = ctx.idInJob().get()
+            if job_id and job_run_id:
+                return str(job_id), str(job_run_id)
+        except Exception:
+            pass
+
     spark = get_spark()
     if spark is not None:
         try:
