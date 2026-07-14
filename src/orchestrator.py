@@ -122,15 +122,16 @@ def _deploy_single_ka(
     schema: str,
     display_name_override: str | None,
     copy_volumes: bool = False,
-) -> tuple[str, str, int]:
+) -> tuple[str, str, int, str]:
     """Export and deploy a single KA.
 
-    Returns (ka_name, status_description, source_example_count).
+    Returns (ka_name, status_description, source_example_count, source_display_name).
     """
     status_parts = []
 
     # Export from source
     config = export_knowledge_assistant(source_client, agent_id)
+    source_display_name = config.get("display_name", "")
 
     if display_name_override:
         config["display_name"] = display_name_override
@@ -228,7 +229,7 @@ def _deploy_single_ka(
 
     status_msg = " | ".join(status_parts)
     print(f"  {status_msg}")
-    return ka_name, status_msg, source_example_count
+    return ka_name, status_msg, source_example_count, source_display_name
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +305,7 @@ def main() -> None:
         update_row_deploy_started(spark, status_table_name, run_id, agent_id)
 
         try:
-            ka_name, status_msg, example_count = _deploy_single_ka(
+            ka_name, status_msg, example_count, src_display_name = _deploy_single_ka(
                 source_client, target_client,
                 agent_id, row_catalog, row_schema,
                 display_override,
@@ -316,6 +317,7 @@ def main() -> None:
                 spark, status_table_name, run_id, agent_id,
                 "Success", status_msg,
                 target_ka_name=ka_name,
+                source_display_name=src_display_name,
                 source_example_count=example_count,
             )
 

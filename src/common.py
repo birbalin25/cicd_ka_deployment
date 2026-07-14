@@ -276,6 +276,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     agent_type STRING,
     agent_id STRING,
     target_ka_name STRING,
+    source_display_name STRING,
     source_example_count INT,
     source_host STRING,
     target_host STRING,
@@ -298,6 +299,7 @@ _DEPLOY_NEW_COLUMNS = [
     ("job_id", "STRING"),
     ("job_run_id", "STRING"),
     ("target_ka_name", "STRING"),
+    ("source_display_name", "STRING"),
     ("source_example_count", "INT"),
     ("source_host", "STRING"),
     ("target_host", "STRING"),
@@ -354,7 +356,7 @@ def init_deployment_table(
             f"""
             INSERT INTO {table_name}
             (run_id, job_id, job_run_id, agent_type, agent_id,
-             target_ka_name, source_example_count, source_host, target_host,
+             target_ka_name, source_display_name, source_example_count, source_host, target_host,
              target_catalog, target_schema, display_name_override, skip_tests,
              status, status_desc, test_status, test_status_desc,
              created_at, started_at, completed_at, updated_at)
@@ -364,6 +366,7 @@ def init_deployment_table(
                 '{job_run_id}',
                 '{row.get("agent_type", "KA")}',
                 '{row["agent_id"]}',
+                '',
                 '',
                 0,
                 '{_escape_sql(source_host)}',
@@ -428,6 +431,7 @@ def update_row_deploy_result(
     status: str,
     status_desc: str,
     target_ka_name: str = "",
+    source_display_name: str = "",
     source_example_count: int = 0,
 ) -> None:
     """Update a row with final deploy result including target KA info."""
@@ -437,6 +441,7 @@ def update_row_deploy_result(
         SET status = '{status}',
             status_desc = '{_escape_sql(status_desc)}',
             target_ka_name = '{_escape_sql(target_ka_name)}',
+            source_display_name = '{_escape_sql(source_display_name)}',
             source_example_count = {source_example_count},
             completed_at = current_timestamp(),
             updated_at = current_timestamp()
