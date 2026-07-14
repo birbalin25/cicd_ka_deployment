@@ -1,4 +1,4 @@
 agent_type,agent_id,target_catalog,target_schema,display_name_override,skip_tests,copy_volumes
-KA,b4b67d24-d217-4312-9f2b-5e1ccc022920,,,bir-first-ka,false,true
-KA,e2756793-fb6c-4bb5-9820-77a3a0103147,main,deploy2,bir-second-ka,false,true
-KA,e2756793-fb6c-4bb5-9820-77a3a0103148,main,deploy2,bir-second-ka,false,true
+KA,b4b67d24-d217-4312-9f2b-5e1ccc022920,,,bir-first-ka,true,true
+KA,e2756793-fb6c-4bb5-9820-77a3a0103147,,,bir-second-ka,true,true
+KA,268aec86-75bf-4f0a-9fa8-473b4f670811,,,bir-third-ka,true,true
