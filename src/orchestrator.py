@@ -47,6 +47,7 @@ from export_ka import export_knowledge_assistant
 from deploy_ka import (
     deploy_assistant as deploy_ka_assistant,
     deploy_knowledge_sources,
+    find_existing_assistant,
 )
 from test_runner import run_tests
 
@@ -313,22 +314,27 @@ def main() -> None:
             pass
 
         if not replace_ka:
-            skip_msg = (
-                f"Skipped — replace_KA is set to false in agents_input.csv. "
-                f"Existing KA on target workspace will not be replaced."
-            )
-            print(f"\nSkipping KA {agent_id}: {skip_msg}")
-            update_row_deploy_result(
-                spark, status_table_name, run_id, agent_id,
-                "Skipped", skip_msg,
-                source_display_name=src_display_name,
-                source_example_count=source_example_count,
-            )
-            update_row_test_status(
-                spark, status_table_name, run_id, agent_id,
-                "N/A", "Deploy skipped — tests not applicable",
-            )
-            continue
+            target_display_name = display_override or src_display_name
+            existing = find_existing_assistant(target_client, target_display_name) if target_display_name else None
+            if existing:
+                skip_msg = (
+                    f"Skipped — KA '{target_display_name}' already exists on target workspace "
+                    f"and replace_KA is set to false in agents_input.csv."
+                )
+                print(f"\nSkipping KA {agent_id}: {skip_msg}")
+                update_row_deploy_result(
+                    spark, status_table_name, run_id, agent_id,
+                    "Skipped", skip_msg,
+                    source_display_name=src_display_name,
+                    source_example_count=source_example_count,
+                )
+                update_row_test_status(
+                    spark, status_table_name, run_id, agent_id,
+                    "N/A", "Deploy skipped — tests not applicable",
+                )
+                continue
+            else:
+                print(f"\n  KA '{target_display_name}' not found on target — proceeding with migration (replace_KA=false).")
 
         print(f"\nDeploying KA {agent_id} ...")
         update_row_deploy_started(spark, status_table_name, run_id, agent_id)
