@@ -16,7 +16,7 @@ variables:
     default: "ka-deployment"
   budget_policy_id:
     description: "Budget policy ID for serverless jobs. Leave empty to use the platform default. Find IDs via: databricks budget-policies list"
-    default: ""
+    default: "511dfd24-7efe-312e-8213-04f11f170b29"
   wait_and_copy_examples:
     description: "If true, deploy job waits for KA ACTIVE state and copies examples inline. If false, examples are deferred to the Copy KA Examples job."
     default: "true"
