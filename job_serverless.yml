@@ -11,6 +11,7 @@ resources:
   jobs:
     batch_deploy_agents:
       name: "Batch Deploy Agents"
+      # budget_policy_id: ${var.budget_policy_id}  # Uncomment and set budget_policy_id variable to attach a specific policy
       parameters:
         - name: catalog
           default: ${var.target_catalog}
@@ -45,6 +46,7 @@ resources:
 
     copy_examples_job:
       name: "Copy KA Examples"
+      # budget_policy_id: ${var.budget_policy_id}  # Uncomment and set budget_policy_id variable to attach a specific policy
       parameters:
         - name: catalog
           default: ${var.target_catalog}

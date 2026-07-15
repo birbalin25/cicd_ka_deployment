@@ -14,6 +14,9 @@ variables:
   secret_scope:
     description: "Databricks secret scope containing source workspace credentials (keys: source-token, source-client-id, source-client-secret)"
     default: "ka-deployment"
+  budget_policy_id:
+    description: "Budget policy ID for serverless jobs. Leave empty to use the platform default. Find IDs via: databricks budget-policies list"
+    default: ""
   wait_and_copy_examples:
     description: "If true, deploy job waits for KA ACTIVE state and copies examples inline. If false, examples are deferred to the Copy KA Examples job."
     default: "true"
