@@ -138,11 +138,23 @@ def get_job_context() -> tuple[str, str]:
 # Source workspace client builder
 # ---------------------------------------------------------------------------
 
+def _read_secret(scope: str, key: str) -> str:
+    """Read a secret from Databricks secret scope, or empty string if unavailable."""
+    dbutils = get_dbutils()
+    if dbutils is not None and scope:
+        try:
+            return dbutils.secrets.get(scope, key)
+        except Exception:
+            pass
+    return ""
+
+
 def build_source_client(
     source_host: str | None,
-    source_token: str | None,
-    source_client_id: str | None,
-    source_client_secret: str | None,
+    secret_scope: str = "",
+    source_token: str | None = None,
+    source_client_id: str | None = None,
+    source_client_secret: str | None = None,
 ) -> WorkspaceClient:
     """Build a WorkspaceClient for the source workspace.
 
@@ -150,16 +162,38 @@ def build_source_client(
     Auth priority: service principal (client_id + client_secret) first;
     if SP fails connectivity check, falls back to PAT (source_token).
     If source_host is blank, returns default client (same workspace).
+
+    Credential resolution order:
+      1. Databricks secret scope (if scope name provided)
+      2. Explicit arguments (for local CLI usage)
+      3. Environment variables (SOURCE_DATABRICKS_TOKEN, etc.)
     """
     if not source_host:
         return WorkspaceClient()
 
-    if source_client_id and source_client_secret:
+    # Resolve credentials: secret scope → explicit args → env vars
+    client_id = (
+        _read_secret(secret_scope, "source-client-id")
+        or source_client_id
+        or os.environ.get("SOURCE_CLIENT_ID", "")
+    )
+    client_secret = (
+        _read_secret(secret_scope, "source-client-secret")
+        or source_client_secret
+        or os.environ.get("SOURCE_CLIENT_SECRET", "")
+    )
+    token = (
+        _read_secret(secret_scope, "source-token")
+        or source_token
+        or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
+    )
+
+    if client_id and client_secret:
         try:
             sp_client = WorkspaceClient(
                 host=source_host,
-                client_id=source_client_id,
-                client_secret=source_client_secret,
+                client_id=client_id,
+                client_secret=client_secret,
             )
             sp_client.current_user.me()
             print(f"  Source auth: service principal OK")
@@ -167,11 +201,12 @@ def build_source_client(
         except Exception as ex:
             print(f"  Source auth: SP failed ({ex}), falling back to PAT...")
 
-    token = source_token or os.environ.get("SOURCE_DATABRICKS_TOKEN", "")
     if not token:
         raise RuntimeError(
             "Source workspace authentication failed. "
-            "Set SOURCE_TOKEN (PAT) or SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (SP)."
+            "Ensure credentials are in secret scope '{scope}', "
+            "or pass --source-token / --source-client-id + --source-client-secret for local use."
+            .format(scope=secret_scope or "(not set)")
         )
     pat_client = WorkspaceClient(host=source_host, token=token)
     print(f"  Source auth: PAT OK")

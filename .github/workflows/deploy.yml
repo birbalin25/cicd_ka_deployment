@@ -10,7 +10,7 @@ on:
       - 'databricks.yml'
   workflow_dispatch:  # allow manual trigger
 
-# Authentication & Host Configurationn
+# Authentication & Host Configuration
 # ------------------------------------
 # For the TARGET workspace, set these in GitHub secrets:
 #   - STAGING_HOST / PROD_HOST (workspace URL, e.g. https://xyz.cloud.databricks.com)
@@ -22,7 +22,8 @@ on:
 #   - SOURCE_HOST (source workspace URL)
 #   - SOURCE_CLIENT_ID + SOURCE_CLIENT_SECRET (Service Principal)
 #   - SOURCE_TOKEN (PAT — fallback if SP not set)
-#   The orchestrator tries SP first; if not set, falls back to PAT.
+#   These are pushed into a Databricks secret scope (not job parameters)
+#   so they are never visible in the Databricks job UI.
 
 jobs:
   # -------------------------------------------------------------------
@@ -35,6 +36,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: databricks/setup-cli@main
+
+      - name: Push source credentials to secret scope
+        run: |
+          databricks secrets create-scope "$SCOPE" 2>/dev/null || true
+          if [ -n "$_SOURCE_TOKEN" ]; then
+            databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
+          fi
+          if [ -n "$_SOURCE_CLIENT_ID" ]; then
+            databricks secrets put-secret "$SCOPE" source-client-id --string-value "$_SOURCE_CLIENT_ID"
+          fi
+          if [ -n "$_SOURCE_CLIENT_SECRET" ]; then
+            databricks secrets put-secret "$SCOPE" source-client-secret --string-value "$_SOURCE_CLIENT_SECRET"
+          fi
+        env:
+          DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          SCOPE: ka-deployment
+          _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+          _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
+          _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Deploy bundle to staging
         run: |
@@ -65,9 +88,6 @@ jobs:
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
           BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
-          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
-          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
-          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
@@ -98,9 +118,6 @@ jobs:
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
           BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
-          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
-          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
-          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
   # -------------------------------------------------------------------
   # Production (requires manual approval)
@@ -113,6 +130,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: databricks/setup-cli@main
+
+      - name: Push source credentials to secret scope
+        run: |
+          databricks secrets create-scope "$SCOPE" 2>/dev/null || true
+          if [ -n "$_SOURCE_TOKEN" ]; then
+            databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
+          fi
+          if [ -n "$_SOURCE_CLIENT_ID" ]; then
+            databricks secrets put-secret "$SCOPE" source-client-id --string-value "$_SOURCE_CLIENT_ID"
+          fi
+          if [ -n "$_SOURCE_CLIENT_SECRET" ]; then
+            databricks secrets put-secret "$SCOPE" source-client-secret --string-value "$_SOURCE_CLIENT_SECRET"
+          fi
+        env:
+          DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          SCOPE: ka-deployment
+          _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+          _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
+          _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Deploy bundle to prod
         run: |
@@ -143,9 +182,6 @@ jobs:
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
           BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
-          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
-          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
-          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}
 
       - name: Run batch deployment
         run: |
@@ -176,6 +212,3 @@ jobs:
           _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
           BUNDLE_VAR_source_host: ${{ secrets.SOURCE_HOST }}
-          BUNDLE_VAR_source_token: ${{ secrets.SOURCE_TOKEN }}
-          BUNDLE_VAR_source_client_id: ${{ secrets.SOURCE_CLIENT_ID }}
-          BUNDLE_VAR_source_client_secret: ${{ secrets.SOURCE_CLIENT_SECRET }}

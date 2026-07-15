@@ -20,12 +20,8 @@ resources:
           default: ${var.status_table_name}
         - name: source_host
           default: ${var.source_host}
-        - name: source_token
-          default: ${var.source_token}
-        - name: source_client_id
-          default: ${var.source_client_id}
-        - name: source_client_secret
-          default: ${var.source_client_secret}
+        - name: secret_scope
+          default: ${var.secret_scope}
         - name: wait_and_copy_examples
           default: ${var.wait_and_copy_examples}
       environments:
@@ -43,9 +39,7 @@ resources:
               schema: "{{job.parameters.schema}}"
               status_table_name: "{{job.parameters.status_table_name}}"
               source_host: "{{job.parameters.source_host}}"
-              source_token: "{{job.parameters.source_token}}"
-              source_client_id: "{{job.parameters.source_client_id}}"
-              source_client_secret: "{{job.parameters.source_client_secret}}"
+              secret_scope: "{{job.parameters.secret_scope}}"
               wait_and_copy_examples: "{{job.parameters.wait_and_copy_examples}}"
           environment_key: default
 
@@ -60,12 +54,8 @@ resources:
           default: ${var.status_table_name}
         - name: source_host
           default: ${var.source_host}
-        - name: source_token
-          default: ${var.source_token}
-        - name: source_client_id
-          default: ${var.source_client_id}
-        - name: source_client_secret
-          default: ${var.source_client_secret}
+        - name: secret_scope
+          default: ${var.secret_scope}
         - name: run_id
           default: ""
       environments:
@@ -83,8 +73,6 @@ resources:
               schema: "{{job.parameters.schema}}"
               status_table_name: "{{job.parameters.status_table_name}}"
               source_host: "{{job.parameters.source_host}}"
-              source_token: "{{job.parameters.source_token}}"
-              source_client_id: "{{job.parameters.source_client_id}}"
-              source_client_secret: "{{job.parameters.source_client_secret}}"
+              secret_scope: "{{job.parameters.secret_scope}}"
               run_id: "{{job.parameters.run_id}}"
           environment_key: default

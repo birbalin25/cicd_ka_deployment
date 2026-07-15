@@ -11,15 +11,9 @@ variables:
   source_host:
     description: "Source workspace URL for cross-workspace export (blank = same workspace)"
     default: ""
-  source_token:
-    description: "Source workspace PAT (used if service principal credentials are not provided)"
-    default: ""
-  source_client_id:
-    description: "Source workspace service principal client ID (takes precedence over PAT)"
-    default: ""
-  source_client_secret:
-    description: "Source workspace service principal client secret"
-    default: ""
+  secret_scope:
+    description: "Databricks secret scope containing source workspace credentials (keys: source-token, source-client-id, source-client-secret)"
+    default: "ka-deployment"
   wait_and_copy_examples:
     description: "If true, deploy job waits for KA ACTIVE state and copies examples inline. If false, examples are deferred to the Copy KA Examples job."
     default: "false"

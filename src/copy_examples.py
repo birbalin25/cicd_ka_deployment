@@ -53,9 +53,7 @@ def _resolve_params() -> dict:
             "schema": dbutils.widgets.get("schema"),
             "status_table_name": dbutils.widgets.get("status_table_name"),
             "source_host": dbutils.widgets.get("source_host"),
-            "source_token": dbutils.widgets.get("source_token"),
-            "source_client_id": dbutils.widgets.get("source_client_id"),
-            "source_client_secret": dbutils.widgets.get("source_client_secret"),
+            "secret_scope": dbutils.widgets.get("secret_scope"),
             "run_id": dbutils.widgets.get("run_id"),
         }
 
@@ -64,9 +62,13 @@ def _resolve_params() -> dict:
     parser.add_argument("--schema", required=True)
     parser.add_argument("--status-table-name", default="")
     parser.add_argument("--source-host", default=None)
-    parser.add_argument("--source-token", default=None)
-    parser.add_argument("--source-client-id", default=None)
-    parser.add_argument("--source-client-secret", default=None)
+    parser.add_argument("--secret-scope", default="")
+    parser.add_argument("--source-token", default=None,
+                        help="Source workspace PAT (local CLI only)")
+    parser.add_argument("--source-client-id", default=None,
+                        help="Source workspace SP client ID (local CLI only)")
+    parser.add_argument("--source-client-secret", default=None,
+                        help="Source workspace SP client secret (local CLI only)")
     parser.add_argument("--run-id", default="",
                         help="Deploy run_id to process (default: latest)")
     args = parser.parse_args()
@@ -75,6 +77,7 @@ def _resolve_params() -> dict:
         "schema": args.schema,
         "status_table_name": args.status_table_name,
         "source_host": args.source_host,
+        "secret_scope": args.secret_scope,
         "source_token": args.source_token,
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
@@ -102,10 +105,11 @@ def main() -> None:
 
     # Build workspace clients
     source_client = build_source_client(
-        params.get("source_host"),
-        params.get("source_token"),
-        params.get("source_client_id"),
-        params.get("source_client_secret"),
+        source_host=params.get("source_host"),
+        secret_scope=params.get("secret_scope", ""),
+        source_token=params.get("source_token"),
+        source_client_id=params.get("source_client_id"),
+        source_client_secret=params.get("source_client_secret"),
     )
     target_client = WorkspaceClient()
 

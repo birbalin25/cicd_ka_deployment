@@ -62,10 +62,9 @@ from test_runner import run_tests
 def _resolve_params() -> dict:
     """Return deployment parameters from notebook widgets or CLI args.
 
-    Source workspace supports two auth methods (service principal takes
-    precedence if both are provided):
-      - Service principal: source_client_id + source_client_secret
-      - PAT: source_token
+    Source workspace credentials are read from a Databricks secret scope
+    (configured via secret_scope parameter). For local CLI usage,
+    credentials can be passed directly via args or env vars.
     """
     dbutils = get_dbutils()
     if dbutils is not None:
@@ -74,9 +73,7 @@ def _resolve_params() -> dict:
             "schema": dbutils.widgets.get("schema"),
             "status_table_name": dbutils.widgets.get("status_table_name"),
             "source_host": dbutils.widgets.get("source_host"),
-            "source_token": dbutils.widgets.get("source_token"),
-            "source_client_id": dbutils.widgets.get("source_client_id"),
-            "source_client_secret": dbutils.widgets.get("source_client_secret"),
+            "secret_scope": dbutils.widgets.get("secret_scope"),
             "wait_and_copy_examples": dbutils.widgets.get("wait_and_copy_examples"),
         }
 
@@ -87,12 +84,14 @@ def _resolve_params() -> dict:
                         help="Fully qualified Delta table for status tracking")
     parser.add_argument("--source-host", default=None,
                         help="Source workspace URL (default: same as target)")
+    parser.add_argument("--secret-scope", default="",
+                        help="Databricks secret scope for source credentials")
     parser.add_argument("--source-token", default=None,
-                        help="Source workspace PAT (or set SOURCE_DATABRICKS_TOKEN)")
+                        help="Source workspace PAT (local CLI only)")
     parser.add_argument("--source-client-id", default=None,
-                        help="Source workspace service principal client ID")
+                        help="Source workspace SP client ID (local CLI only)")
     parser.add_argument("--source-client-secret", default=None,
-                        help="Source workspace service principal client secret")
+                        help="Source workspace SP client secret (local CLI only)")
     parser.add_argument("--wait-and-copy-examples", default="false",
                         help="Wait for KA ACTIVE and copy examples inline (default: false)")
     args = parser.parse_args()
@@ -101,6 +100,7 @@ def _resolve_params() -> dict:
         "schema": args.schema,
         "status_table_name": args.status_table_name,
         "source_host": args.source_host,
+        "secret_scope": args.secret_scope,
         "source_token": args.source_token,
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
@@ -257,10 +257,11 @@ def main() -> None:
 
     # Build workspace clients
     source_client = build_source_client(
-        params.get("source_host"),
-        params.get("source_token"),
-        params.get("source_client_id"),
-        params.get("source_client_secret"),
+        source_host=params.get("source_host"),
+        secret_scope=params.get("secret_scope", ""),
+        source_token=params.get("source_token"),
+        source_client_id=params.get("source_client_id"),
+        source_client_secret=params.get("source_client_secret"),
     )
     target_client = WorkspaceClient()
 
