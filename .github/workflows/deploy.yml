@@ -39,6 +39,7 @@ jobs:
 
       - name: Push source credentials to secret scope
         run: |
+          SCOPE="${BUNDLE_VAR_secret_scope:-ka-deployment}"
           databricks secrets create-scope "$SCOPE" 2>/dev/null || true
           if [ -n "$_SOURCE_TOKEN" ]; then
             databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
@@ -54,7 +55,7 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          SCOPE: ka-deployment
+          BUNDLE_VAR_secret_scope: ${{ vars.SECRET_SCOPE }}
           _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
           _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
           _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
@@ -133,6 +134,7 @@ jobs:
 
       - name: Push source credentials to secret scope
         run: |
+          SCOPE="${BUNDLE_VAR_secret_scope:-ka-deployment}"
           databricks secrets create-scope "$SCOPE" 2>/dev/null || true
           if [ -n "$_SOURCE_TOKEN" ]; then
             databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
@@ -148,7 +150,7 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          SCOPE: ka-deployment
+          BUNDLE_VAR_secret_scope: ${{ vars.SECRET_SCOPE }}
           _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
           _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
           _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
