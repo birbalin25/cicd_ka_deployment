@@ -3,7 +3,7 @@ bundle:
 
 include:
   - variables.yml
-  # Compute switch: change to job_classic.yml for classic computee
+  # Compute switch: change to job_classic.yml for classic compute
   - job_serverless.yml
 
 # Workspace host per target:
