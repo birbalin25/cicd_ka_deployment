@@ -38,6 +38,7 @@ jobs:
       - uses: databricks/setup-cli@main
 
       - name: Push source credentials to secret scope
+        working-directory: /tmp
         run: |
           SCOPE="${_SECRET_SCOPE:-ka-deployment}"
           # Auth: try SP first, fall back to PAT
@@ -140,6 +141,7 @@ jobs:
       - uses: databricks/setup-cli@main
 
       - name: Push source credentials to secret scope
+        working-directory: /tmp
         run: |
           SCOPE="${_SECRET_SCOPE:-ka-deployment}"
           # Auth: try SP first, fall back to PAT
