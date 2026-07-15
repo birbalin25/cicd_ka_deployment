@@ -39,7 +39,14 @@ jobs:
 
       - name: Push source credentials to secret scope
         run: |
-          SCOPE="${BUNDLE_VAR_secret_scope:-ka-deployment}"
+          SCOPE="${_SECRET_SCOPE:-ka-deployment}"
+          # Auth: try SP first, fall back to PAT
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+          elif [ -n "$_TOKEN" ]; then
+            export DATABRICKS_TOKEN="$_TOKEN"
+          fi
           databricks secrets create-scope "$SCOPE" 2>/dev/null || true
           if [ -n "$_SOURCE_TOKEN" ]; then
             databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
@@ -52,10 +59,10 @@ jobs:
           fi
         env:
           DATABRICKS_HOST: ${{ secrets.STAGING_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.STAGING_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          BUNDLE_VAR_secret_scope: ${{ vars.SECRET_SCOPE }}
+          _TOKEN: ${{ secrets.STAGING_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _SECRET_SCOPE: ${{ vars.SECRET_SCOPE }}
           _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
           _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
           _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
@@ -134,7 +141,14 @@ jobs:
 
       - name: Push source credentials to secret scope
         run: |
-          SCOPE="${BUNDLE_VAR_secret_scope:-ka-deployment}"
+          SCOPE="${_SECRET_SCOPE:-ka-deployment}"
+          # Auth: try SP first, fall back to PAT
+          if [ -n "$_CLIENT_ID" ] && [ -n "$_CLIENT_SECRET" ]; then
+            export DATABRICKS_CLIENT_ID="$_CLIENT_ID"
+            export DATABRICKS_CLIENT_SECRET="$_CLIENT_SECRET"
+          elif [ -n "$_TOKEN" ]; then
+            export DATABRICKS_TOKEN="$_TOKEN"
+          fi
           databricks secrets create-scope "$SCOPE" 2>/dev/null || true
           if [ -n "$_SOURCE_TOKEN" ]; then
             databricks secrets put-secret "$SCOPE" source-token --string-value "$_SOURCE_TOKEN"
@@ -147,10 +161,10 @@ jobs:
           fi
         env:
           DATABRICKS_HOST: ${{ secrets.PROD_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.PROD_TOKEN }}
-          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-          BUNDLE_VAR_secret_scope: ${{ vars.SECRET_SCOPE }}
+          _TOKEN: ${{ secrets.PROD_TOKEN }}
+          _CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          _CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          _SECRET_SCOPE: ${{ vars.SECRET_SCOPE }}
           _SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
           _SOURCE_CLIENT_ID: ${{ secrets.SOURCE_CLIENT_ID }}
           _SOURCE_CLIENT_SECRET: ${{ secrets.SOURCE_CLIENT_SECRET }}
