@@ -260,28 +260,57 @@ D.append(page_break())
 # ===========================================================================
 D.append(h1("3.  Configuration — variables.yml"))
 D.append(body("variables.yml defines the settings the jobs use. Each variable has a default and can be "
-              "overridden per environment (dev / staging / prod) in the targets section."))
+              "overridden per environment (dev / staging / prod) in the targets section. The table below "
+              "mirrors the inline comments in variables.yml."))
 D.append(h2("Variables"))
 D.append(table(
-    ["Variable", "What it controls", "Example value"],
+    ["Variable", "What it controls", "Default", "Example"],
     [
-        ["`env_prefix`", "Prefix for job names (include trailing underscore).", "`Prod_`"],
-        ["`target_catalog`", "Default catalog KAs deploy into.", "`prod_catalog`"],
-        ["`target_schema`", "Default schema KAs deploy into.", "`ka_schema`"],
-        ["`status_table_name`", "Deploy status table (blank = {catalog}.{schema}.ka_deployment_status).", "`main.ka.ka_deployment_status`"],
-        ["`source_host`", "Source workspace URL to export from.", "`https://adb-7405617211688462.2.azuredatabricks.net`"],
-        ["`secret_scope`", "Secret scope holding source credentials.", "`ka-deployment`"],
-        ["`budget_policy_id`", "Serverless usage policy ID for the jobs.", "`511dfd24-7efe-312e-8213-04f11f170b29`"],
-        ["`wait_and_copy_examples`", "true = copy examples inline; false = defer to copy job.", "`false`"],
-        ["`deploy_wait_minutes`", "Max minutes to wait per KA for ACTIVE (inline copy).", "`40`"],
-        ["`copy_wait_minutes`", "Max minutes the copy job polls per KA for ACTIVE.", "`3`"],
-        ["`since_timestamp`", "Copy job: only rows completed after this (blank = all pending).", "`2026-07-16T06:13:58`"],
-        ["`cluster_spark_version`", "Spark version (classic compute only).", "`15.4.x-scala2.12`"],
-        ["`cluster_node_type`", "Node type (classic compute only).", "`Standard_DS3_v2`"],
+        ["`env_prefix`",
+         "Prefix added to every job name. Include the trailing underscore yourself (no space is added). Set per environment.",
+         "`Dev_`", "`Prod_`"],
+        ["`target_catalog`",
+         "Default catalog KAs deploy into. Overridden per row by the target_catalog column in agents_input.csv when non-empty.",
+         "`main`", "`prod_catalog`"],
+        ["`target_schema`",
+         "Default schema KAs deploy into. Overridden per row by the target_schema column in agents_input.csv when non-empty.",
+         "`default`", "`ka_schema`"],
+        ["`status_table_name`",
+         "Fully-qualified Delta status table. Blank uses the convention {catalog}.{schema}.ka_deployment_status.",
+         "(blank)", "`main.ka.ka_deployment_status`"],
+        ["`source_host`",
+         "Source workspace to export KAs FROM (full https URL). Blank = export from the same workspace.",
+         "(set)", "`https://adb-xxxx.7.azuredatabricks.net`"],
+        ["`secret_scope`",
+         "Secret scope holding SOURCE credentials. Keys: source-token, source-client-id, source-client-secret.",
+         "`ka-deployment`", "`ka-deployment`"],
+        ["`budget_policy_id`",
+         "Serverless usage policy ID attached to the jobs. Blank = workspace default. List IDs: databricks budget-policies list.",
+         "(set)", "`511dfd24-7efe-312e-8213-04f11f170b29`"],
+        ["`wait_and_copy_examples`",
+         "true = deploy job waits for ACTIVE and copies examples inline. false = defer to the Copy KA Examples job.",
+         "`true`", "`false`"],
+        ["`deploy_wait_minutes`",
+         "Used when wait_and_copy_examples=true. Max MINUTES to poll each KA for ACTIVE before copying. A per-KA ceiling, not an added delay for every KA (KAs provision in parallel).",
+         "`40`", "`40`"],
+        ["`copy_wait_minutes`",
+         "Max MINUTES the Copy KA Examples job polls each KA for ACTIVE before skipping it. A skipped KA stays Pending and is retried next run.",
+         "`3`", "`3`"],
+        ["`since_timestamp`",
+         "Copy job filter. Set = only rows with completed_at newer than this (all runs). Blank = ALL rows still pending copy. Format YYYY-MM-DDTHH:MM:SS.",
+         "(blank)", "`2026-07-16T06:13:58`"],
+        ["`cluster_spark_version`",
+         "Spark version for CLASSIC compute only (ignored on serverless).",
+         "`15.4.x-scala2.12`", "`15.4.x-scala2.12`"],
+        ["`cluster_node_type`",
+         "Node type for CLASSIC compute only (ignored on serverless).",
+         "`Standard_DS3_v2`", "`Standard_DS3_v2`"],
     ],
-    [2400, 4400, 2200],
+    [1950, 4350, 1450, 1250],
 ))
 D.append(h2("Per-environment overrides"))
+D.append(body("Any variable can be overridden per environment in the targets section. Values not listed "
+              "there fall back to the defaults above."))
 D.append(code([
     "targets:",
     "  staging:",
@@ -296,7 +325,8 @@ D.append(code([
     "      target_catalog: \"prod_catalog\"",
     "      since_timestamp: \"2026-07-16T06:13:58\"",
 ]))
-D.append(note("Timestamp format is YYYY-MM-DDTHH:MM:SS, e.g. 2026-07-16T06:13:58."))
+D.append(note("Timestamp format is YYYY-MM-DDTHH:MM:SS, e.g. 2026-07-16T06:13:58. "
+              "Wait times (deploy_wait_minutes, copy_wait_minutes) are in MINUTES."))
 D.append(page_break())
 
 # ===========================================================================
