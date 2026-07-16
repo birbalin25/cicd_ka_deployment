@@ -62,8 +62,6 @@ resources:
           default: ${var.source_host}
         - name: secret_scope
           default: ${var.secret_scope}
-        - name: run_id
-          default: ""
         - name: since_timestamp
           default: ${var.since_timestamp}
         - name: copy_wait_minutes
@@ -85,7 +83,6 @@ resources:
               status_table_name: "{{job.parameters.status_table_name}}"
               source_host: "{{job.parameters.source_host}}"
               secret_scope: "{{job.parameters.secret_scope}}"
-              run_id: "{{job.parameters.run_id}}"
               since_timestamp: "{{job.parameters.since_timestamp}}"
               copy_wait_minutes: "{{job.parameters.copy_wait_minutes}}"
           environment_key: default

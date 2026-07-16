@@ -10,11 +10,11 @@ and KA state transitions to ACTIVE.
 
 Usage (Databricks notebook — invoked by the DAB job):
     Widgets: catalog, schema, status_table_name,
-             source_host, secret_scope, run_id, since_timestamp
+             source_host, secret_scope, since_timestamp, copy_wait_minutes
 
-    - run_id (optional): deploy run to process (default: latest run).
-    - since_timestamp (optional): if set, process pending rows across all
-      runs whose completed_at is newer than this timestamp; overrides run_id.
+    - since_timestamp (optional): if set, process pending rows whose
+      completed_at is newer than this timestamp. Blank = process ALL rows
+      with copied_examples = 'Pending' across every run.
 
 Usage (local):
     export DATABRICKS_HOST=https://target-workspace.cloud.databricks.com
@@ -57,7 +57,6 @@ def _resolve_params() -> dict:
             "status_table_name": dbutils.widgets.get("status_table_name"),
             "source_host": dbutils.widgets.get("source_host"),
             "secret_scope": dbutils.widgets.get("secret_scope"),
-            "run_id": dbutils.widgets.get("run_id"),
             "since_timestamp": dbutils.widgets.get("since_timestamp"),
             "copy_wait_minutes": dbutils.widgets.get("copy_wait_minutes"),
         }
@@ -74,11 +73,9 @@ def _resolve_params() -> dict:
                         help="Source workspace SP client ID (local CLI only)")
     parser.add_argument("--source-client-secret", default=None,
                         help="Source workspace SP client secret (local CLI only)")
-    parser.add_argument("--run-id", default="",
-                        help="Deploy run_id to process (default: latest)")
     parser.add_argument("--since-timestamp", default="",
                         help="Only process rows with completed_at newer than this "
-                             "timestamp (e.g. '2026-07-15 00:00:00'). Overrides --run-id.")
+                             "timestamp (e.g. '2026-07-15 00:00:00'). Blank = all pending rows.")
     parser.add_argument("--copy-wait-minutes", default="3",
                         help="Minutes to wait per KA for ACTIVE state (default: 3)")
     args = parser.parse_args()
@@ -91,7 +88,6 @@ def _resolve_params() -> dict:
         "source_token": args.source_token,
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
-        "run_id": args.run_id,
         "since_timestamp": args.since_timestamp,
         "copy_wait_minutes": args.copy_wait_minutes,
     }
@@ -139,13 +135,11 @@ def main() -> None:
     # Init examples table
     init_examples_table(spark, examples_table)
 
-    # Determine which pending rows to process. Precedence:
-    #   1. since_timestamp set  -> all runs with completed_at newer than it
-    #   2. run_id set (explicit override) -> just that run
-    #   3. neither set (default) -> ALL rows pending copy, across every run
-    # In all cases only rows with copied_examples = 'Pending' are selected.
+    # Determine which pending rows to process:
+    #   - since_timestamp set   -> rows with completed_at newer than it
+    #   - since_timestamp blank -> ALL rows pending copy, across every run
+    # In both cases only rows with copied_examples = 'Pending' are selected.
     since_timestamp = (params.get("since_timestamp") or "").strip()
-    run_id_filter = (params.get("run_id") or "").strip()
 
     select_cols = (
         "SELECT run_id, agent_id, target_ka_name, "
@@ -161,16 +155,6 @@ def main() -> None:
             {select_cols}
             FROM {deploy_table}
             WHERE completed_at > TIMESTAMP '{safe_ts}'
-              AND copied_examples = 'Pending'
-            """
-        ).collect()
-    elif run_id_filter:
-        print(f"Processing pending rows for run_id: {run_id_filter}")
-        candidates = spark.sql(
-            f"""
-            {select_cols}
-            FROM {deploy_table}
-            WHERE run_id = '{run_id_filter}'
               AND copied_examples = 'Pending'
             """
         ).collect()
