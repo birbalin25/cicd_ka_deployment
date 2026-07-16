@@ -80,13 +80,14 @@ variables:
     default: "3"
 
   # Copy KA Examples job filter. If set, only deploy rows whose completed_at
-  # is NEWER than this timestamp are processed (across all runs). Leave blank
-  # to process the latest run only.
+  # is NEWER than this timestamp are processed (across all runs). Leave BLANK
+  # to process ALL rows still pending copy (copied_examples = 'Pending') across
+  # every run.
   # Timestamp format: YYYY-MM-DDTHH:MM:SS  (a bare date YYYY-MM-DD also works).
   # Example: "2026-07-16T06:13:58"
   since_timestamp:
-    description: "Copy job: only process rows with completed_at newer than this. Format YYYY-MM-DDTHH:MM:SS. Example: 2026-07-16T06:13:58"
-    default: "2026-07-16T06:13:58"
+    description: "Copy job: only process rows with completed_at newer than this (blank = all pending rows). Format YYYY-MM-DDTHH:MM:SS. Example: 2026-07-16T06:13:58"
+    default: ""
 
   # Spark version for CLASSIC compute only (ignored on serverless).
   # Example: "15.4.x-scala2.12"

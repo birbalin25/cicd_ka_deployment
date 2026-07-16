@@ -275,7 +275,7 @@ D.append(table(
         ["`wait_and_copy_examples`", "true = copy examples inline; false = defer to copy job.", "`false`"],
         ["`deploy_wait_minutes`", "Max minutes to wait per KA for ACTIVE (inline copy).", "`40`"],
         ["`copy_wait_minutes`", "Max minutes the copy job polls per KA for ACTIVE.", "`3`"],
-        ["`since_timestamp`", "Copy job: only process rows completed after this time.", "`2026-07-16T06:13:58`"],
+        ["`since_timestamp`", "Copy job: only rows completed after this (blank = all pending).", "`2026-07-16T06:13:58`"],
         ["`cluster_spark_version`", "Spark version (classic compute only).", "`15.4.x-scala2.12`"],
         ["`cluster_node_type`", "Node type (classic compute only).", "`Standard_DS3_v2`"],
     ],
@@ -497,7 +497,7 @@ D.append(body("The deploy job finishes without waiting. Run the Copy KA Examples
 D.append(h2("Processing only recent runs (since_timestamp)"))
 D.append(body("The copy job accepts an optional since_timestamp. When set, it processes only deploy rows "
               "whose completed_at is newer than that timestamp (across all runs). When blank, it processes "
-              "the latest run."))
+              "ALL rows still pending copy (copied_examples = 'Pending') across every run."))
 D.append(code([
     "databricks bundle run copy_examples_job -t staging \\",
     "  -- --since-timestamp \"2026-07-16T06:13:58\"",

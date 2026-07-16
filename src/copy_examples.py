@@ -139,45 +139,48 @@ def main() -> None:
     # Init examples table
     init_examples_table(spark, examples_table)
 
-    # Determine selection filter. A since_timestamp (if provided) takes
-    # precedence over run_id: it selects pending rows across all runs whose
-    # completed_at is strictly newer than the given timestamp.
+    # Determine which pending rows to process. Precedence:
+    #   1. since_timestamp set  -> all runs with completed_at newer than it
+    #   2. run_id set (explicit override) -> just that run
+    #   3. neither set (default) -> ALL rows pending copy, across every run
+    # In all cases only rows with copied_examples = 'Pending' are selected.
     since_timestamp = (params.get("since_timestamp") or "").strip()
+    run_id_filter = (params.get("run_id") or "").strip()
+
+    select_cols = (
+        "SELECT run_id, agent_id, target_ka_name, "
+        "display_name_override, source_example_count, "
+        "source_host, target_host"
+    )
 
     if since_timestamp:
         safe_ts = since_timestamp.replace("'", "")
-        print(f"Processing rows with completed_at > '{safe_ts}'")
+        print(f"Processing all pending rows with completed_at > '{safe_ts}'")
         candidates = spark.sql(
             f"""
-            SELECT run_id, agent_id, target_ka_name,
-                   display_name_override, source_example_count,
-                   source_host, target_host
+            {select_cols}
             FROM {deploy_table}
             WHERE completed_at > TIMESTAMP '{safe_ts}'
               AND copied_examples = 'Pending'
             """
         ).collect()
-    else:
-        # Determine run_id filter
-        run_id_filter = (params.get("run_id") or "").strip()
-        if not run_id_filter:
-            latest = spark.sql(
-                f"SELECT run_id FROM {deploy_table} ORDER BY completed_at DESC LIMIT 1"
-            ).collect()
-            if not latest:
-                print("No rows found in deploy status table.")
-                return
-            run_id_filter = latest[0]["run_id"]
-
-        print(f"Processing run_id: {run_id_filter}")
+    elif run_id_filter:
+        print(f"Processing pending rows for run_id: {run_id_filter}")
         candidates = spark.sql(
             f"""
-            SELECT run_id, agent_id, target_ka_name,
-                   display_name_override, source_example_count,
-                   source_host, target_host
+            {select_cols}
             FROM {deploy_table}
             WHERE run_id = '{run_id_filter}'
               AND copied_examples = 'Pending'
+            """
+        ).collect()
+    else:
+        print("Processing all pending rows (copied_examples = 'Pending') across all runs")
+        candidates = spark.sql(
+            f"""
+            {select_cols}
+            FROM {deploy_table}
+            WHERE copied_examples = 'Pending'
             """
         ).collect()
 
