@@ -1,4 +1,7 @@
 variables:
+  env_prefix:
+    description: "Environment prefix for job names (no trailing space), e.g. Prod_ / Staging_ / Dev_"
+    default: "Dev_"
   target_catalog:
     description: "Target catalog namee"
     default: "main"
@@ -34,11 +37,13 @@ variables:
 targets:
   dev:
     variables:
+      env_prefix: "Dev_"
       target_catalog: "dev_catalog"
       target_schema: "dev_schema"
 
   staging:
     variables:
+      env_prefix: "Staging_"
       target_catalog: "dev"
       target_schema: "birschema"
       # Azure workspaces use different node types
@@ -46,5 +51,6 @@ targets:
 
   prod:
     variables:
+      env_prefix: "Prod_"
       target_catalog: "dev"
       target_schema: "birschema"

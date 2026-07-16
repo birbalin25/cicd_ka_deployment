@@ -10,7 +10,7 @@
 resources:
   jobs:
     batch_deploy_agents:
-      name: "Batch Deploy Agents"
+      name: "${var.env_prefix}Batch_Deploy_Agents"
       budget_policy_id: ${var.budget_policy_id}
       parameters:
         - name: catalog
@@ -46,7 +46,7 @@ resources:
           environment_key: default
 
     copy_examples_job:
-      name: "Copy KA Examples"
+      name: "${var.env_prefix}Copy_KA_Examples"
       budget_policy_id: ${var.budget_policy_id}
       parameters:
         - name: catalog

@@ -10,7 +10,7 @@
 resources:
   jobs:
     batch_deploy_agents:
-      name: "Batch Deploy Agents"
+      name: "${var.env_prefix}Batch_Deploy_Agents"
       parameters:
         - name: catalog
           default: ${var.target_catalog}
@@ -53,7 +53,7 @@ resources:
                 package: databricks-sdk>=0.40.0
 
     copy_examples_job:
-      name: "Copy KA Examples"
+      name: "${var.env_prefix}Copy_KA_Examples"
       parameters:
         - name: catalog
           default: ${var.target_catalog}
