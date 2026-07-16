@@ -186,11 +186,12 @@ D.append(toc_field([
     ("2.  Input File — agents_input.csv", 1),
     ("3.  Configuration — variables.yml", 1),
     ("4.  Authentication", 1),
-    ("5.  GitHub Secrets & Variables by Environment", 1),
-    ("6.  How to Deploy (Run the Tool)", 1),
-    ("7.  Status Tracking Tables", 1),
-    ("8.  Copying Examples", 1),
-    ("9.  Troubleshooting", 1),
+    ("5.  Prerequisites & Permissions Checklist", 1),
+    ("6.  GitHub Secrets & Variables by Environment", 1),
+    ("7.  How to Deploy (Run the Tool)", 1),
+    ("8.  Status Tracking Tables", 1),
+    ("9.  Copying Examples", 1),
+    ("10.  Troubleshooting", 1),
 ]))
 D.append(page_break())
 
@@ -386,9 +387,101 @@ D.append(note("The secret scope name comes from the secret_scope variable (defau
 D.append(page_break())
 
 # ===========================================================================
-# TAB 5 — GitHub secrets & variables by environment
+# TAB 5 — Prerequisites & Permissions Checklist
 # ===========================================================================
-D.append(h1("5.  GitHub Secrets & Variables by Environment"))
+D.append(h1("5.  Prerequisites & Permissions Checklist"))
+D.append(body("Grant these BEFORE running the tool. Requirements are derived from the actual API and SDK "
+              "calls the jobs make. The identity is the Service Principal (or PAT owner) used for each "
+              "workspace — TARGET is where KAs are created, SOURCE is where they are exported from."))
+
+D.append(h2("Workspace & platform"))
+for b in [
+    "TARGET workspace: Unity Catalog enabled, serverless compute enabled, Premium/Enterprise tier.",
+    "TARGET workspace: NOT enrolled in the Serverless Access Controls Preview (it blocks KA creation).",
+    "Mosaic AI Agent Bricks preview enabled (Admin Console → Workspace Settings → Previews).",
+    "Serverless usage policy exists and the running identity has the User role on it (needed for KA / serverless AI).",
+    "Both workspaces are in a region where Knowledge Assistant is supported.",
+]:
+    D.append(bullet(b))
+
+D.append(h2("TARGET identity — Knowledge Assistant"))
+D.append(body("The job creates KAs via POST/DELETE on the knowledge-assistants REST API and reads examples/"
+              "sources. The identity needs to create and manage KAs on the target."))
+for b in [
+    "Create, read, update, delete Knowledge Assistants (KA admin / can-manage on the target).",
+    "Permission to create the KA's backing serving endpoint (serverless model serving).",
+]:
+    D.append(bullet(b))
+
+D.append(h2("TARGET identity — Unity Catalog"))
+D.append(body("KAs and their knowledge sources live under a catalog/schema, and file-based sources use "
+              "UC Volumes. Grants needed on the TARGET catalog and schema:"))
+D.append(table(
+    ["UC privilege", "On", "Why (code path)"],
+    [
+        ["`USE CATALOG`", "target catalog", "Resolve/deploy KA and sources under the catalog."],
+        ["`USE SCHEMA`", "target schema", "Resolve/deploy KA and sources under the schema."],
+        ["`CREATE VOLUME`", "target schema", "volumes.create() when copy_volumes=true (create missing volume)."],
+        ["`READ VOLUME`", "target volume(s)", "volumes.read() to verify a volume exists; files.upload()."],
+        ["`WRITE VOLUME`", "target volume(s)", "files.upload() copies source files into the target volume."],
+        ["USE CATALOG + USE SCHEMA", "index catalog/schema", "vector_search_indexes.get_index() pre-flight check for index sources."],
+        ["Vector Search index access", "target index", "Index-based sources must already exist on target and be readable."],
+    ],
+    [2600, 2400, 4000],
+))
+D.append(note("If copy_volumes=false, the target volume must already exist and be readable — the job only "
+              "verifies it (volumes.read) and will fail if missing."))
+
+D.append(h2("TARGET identity — status tables"))
+D.append(body("The jobs create and write two Delta tables (ka_deployment_status, ka_examples_status) under "
+              "the target catalog/schema."))
+for b in [
+    "CREATE TABLE on the target schema (tables are auto-created on first run; ALTER TABLE for migrations).",
+    "MODIFY / SELECT on those tables (INSERT and UPDATE status rows).",
+]:
+    D.append(bullet(b))
+
+D.append(h2("SOURCE identity"))
+D.append(body("Used to export KA definitions and (optionally) read volume files from the source workspace."))
+for b in [
+    "Read Knowledge Assistants: GET knowledge-assistants, its knowledge-sources, and examples (can-view on the KAs to migrate).",
+    "READ VOLUME on any file-based source volumes (files.list_directory_contents + files.download) when copy_volumes=true.",
+    "USE CATALOG / USE SCHEMA on the source catalog/schema backing those volumes.",
+]:
+    D.append(bullet(b))
+
+D.append(h2("Credentials / secret scope"))
+for b in [
+    "The CI identity (or you, locally) can create/write the Databricks secret scope named by secret_scope.",
+    "Source SP credentials (client id + secret) OR a source PAT are stored under the scope keys "
+    "source-client-id, source-client-secret, source-token.",
+    "Target auth: SP (DATABRICKS_CLIENT_ID + SECRET) is tried first, then the PAT falls back — provide at least one.",
+]:
+    D.append(bullet(b))
+
+D.append(h2("Quick pre-flight checklist"))
+D.append(table(
+    ["#", "Check", "Where"],
+    [
+        ["1", "SP/PAT can create & manage KAs", "Target workspace"],
+        ["2", "User role on a serverless usage policy", "Target workspace"],
+        ["3", "USE CATALOG + USE SCHEMA granted", "Target catalog/schema"],
+        ["4", "CREATE/READ/WRITE VOLUME (if copy_volumes=true)", "Target schema/volumes"],
+        ["5", "Vector index exists & readable (index sources)", "Target"],
+        ["6", "CREATE TABLE + MODIFY on status tables", "Target schema"],
+        ["7", "Can view/read KAs to migrate + their examples", "Source workspace"],
+        ["8", "READ VOLUME on source volumes (if copy_volumes=true)", "Source"],
+        ["9", "Secret scope created with source creds", "Target workspace"],
+        ["10", "Not enrolled in Serverless Access Controls Preview", "Target workspace"],
+    ],
+    [500, 6100, 2400],
+))
+D.append(page_break())
+
+# ===========================================================================
+# TAB 6 — GitHub secrets & variables by environment
+# ===========================================================================
+D.append(h1("6.  GitHub Secrets & Variables by Environment"))
 D.append(body("The GitHub Actions workflow uses two environments: staging and production. Create the "
               "secrets under each GitHub Environment (Settings → Environments), except the shared ones "
               "noted below. Names must match exactly."))
@@ -457,11 +550,11 @@ D.append(page_break())
 # ===========================================================================
 # TAB 6 — How to deploy
 # ===========================================================================
-D.append(h1("6.  How to Deploy (Run the Tool)"))
+D.append(h1("7.  How to Deploy (Run the Tool)"))
 D.append(h2("Option A — Automatic (CI/CD)"))
 D.append(body("Pushing to the main branch triggers the GitHub Actions workflow, which deploys the bundle "
               "and runs the job for staging (prod requires manual approval). Credentials come from the "
-              "GitHub environment secrets described in section 5."))
+              "GitHub environment secrets described in section 6."))
 D.append(h2("Option B — Manual (Databricks CLI)"))
 D.append(body("1) Deploy the bundle:"))
 D.append(code(["databricks bundle deploy -t staging"]))
@@ -478,7 +571,7 @@ D.append(page_break())
 # ===========================================================================
 # TAB 7 — Status tables
 # ===========================================================================
-D.append(h1("7.  Status Tracking Tables"))
+D.append(h1("8.  Status Tracking Tables"))
 D.append(h2("ka_deployment_status (deploy job)"))
 D.append(table(
     ["Column", "Meaning"],
@@ -513,7 +606,7 @@ D.append(page_break())
 # ===========================================================================
 # TAB 8 — Copying examples
 # ===========================================================================
-D.append(h1("8.  Copying Examples"))
+D.append(h1("9.  Copying Examples"))
 D.append(body("Example questions are copied only after a KA reaches ACTIVE. How this happens is controlled "
               "by the wait_and_copy_examples variable."))
 D.append(h2("Inline (wait_and_copy_examples = true)"))
@@ -538,7 +631,7 @@ D.append(page_break())
 # ===========================================================================
 # TAB 9 — Troubleshooting
 # ===========================================================================
-D.append(h1("9.  Troubleshooting"))
+D.append(h1("10.  Troubleshooting"))
 D.append(table(
     ["Symptom", "Likely cause & fix"],
     [
