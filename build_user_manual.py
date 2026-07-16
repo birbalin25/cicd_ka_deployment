@@ -189,9 +189,10 @@ D.append(toc_field([
     ("5.  Prerequisites & Permissions Checklist", 1),
     ("6.  GitHub Secrets & Variables by Environment", 1),
     ("7.  How to Deploy (Run the Tool)", 1),
-    ("8.  Status Tracking Tables", 1),
-    ("9.  Copying Examples", 1),
-    ("10.  Troubleshooting", 1),
+    ("8.  Running the Tool Locally", 1),
+    ("9.  Status Tracking Tables", 1),
+    ("10.  Copying Examples", 1),
+    ("11.  Troubleshooting", 1),
 ]))
 D.append(page_break())
 
@@ -585,9 +586,111 @@ D.append(body("databricks.yml includes either job_serverless.yml (default) or jo
 D.append(page_break())
 
 # ===========================================================================
-# TAB 7 — Status tables
+# TAB 8 — Running locally
 # ===========================================================================
-D.append(h1("8.  Status Tracking Tables"))
+D.append(h1("8.  Running the Tool Locally"))
+D.append(body("You can run from your laptop in two ways. Both need the Databricks CLI installed and "
+              "authenticated to the TARGET workspace. The key difference is WHERE the code executes, which "
+              "changes whether the source secret scope is used."))
+
+D.append(h2("Prerequisites"))
+for b in [
+    "Databricks CLI installed (databricks -v).",
+    "A profile in ~/.databrickscfg for the target workspace, OR the DATABRICKS_HOST / auth env vars set.",
+    "The same permissions from section 5 — held by the identity you authenticate as (SP or your user/PAT).",
+]:
+    D.append(bullet(b))
+
+D.append(h2("Authenticate to the TARGET workspace"))
+D.append(body("Pick ONE. A ~/.databrickscfg profile is simplest; env vars also work."))
+D.append(body("Profile (recommended):"))
+D.append(code([
+    "# ~/.databrickscfg",
+    "[myprofile]",
+    "host  = https://adb-xxxx.7.azuredatabricks.net",
+    "token = dapiXXXXXXXXXXXXXXXX          # PAT",
+    "# --- or Service Principal (OAuth M2M) instead of token ---",
+    "# client_id     = <sp-client-id>",
+    "# client_secret = <sp-client-secret>",
+]))
+D.append(body("Environment variables (alternative):"))
+D.append(code([
+    "export DATABRICKS_HOST=https://adb-xxxx.7.azuredatabricks.net",
+    "export DATABRICKS_TOKEN=dapiXXXXXXXXXXXXXXXX          # PAT",
+    "# --- or SP instead of token ---",
+    "# export DATABRICKS_CLIENT_ID=<sp-client-id>",
+    "# export DATABRICKS_CLIENT_SECRET=<sp-client-secret>",
+]))
+
+D.append(h2("Option A — Bundle CLI from local (runs ON Databricks compute)"))
+D.append(body("This is the normal local workflow: you trigger the DAB from your laptop, but the job "
+              "actually executes on Databricks. Use a target that maps to your workspace profile."))
+D.append(code([
+    "databricks bundle deploy -t dev -p myprofile",
+    "databricks bundle run batch_deploy_agents -t dev -p myprofile",
+    "databricks bundle run copy_examples_job  -t dev -p myprofile",
+]))
+D.append(note("Because the job runs on Databricks (dbutils is available), it reads SOURCE credentials from "
+              "the secret scope. So the secret scope AND its keys (source-client-id, source-client-secret, "
+              "source-token) MUST already exist on the target workspace before you run. See 'Set up the "
+              "secret scope' below."))
+
+D.append(h2("Option B — Direct Python script (runs ON your laptop)"))
+D.append(body("Runs the notebook code as a plain script. Requires a Spark session available locally "
+              "(e.g. Databricks Connect). Here SOURCE credentials are passed as CLI args or env vars — the "
+              "secret scope is NOT used at all (dbutils is absent locally)."))
+D.append(code([
+    "# target auth from profile/env vars above; pass source creds explicitly",
+    "python src/orchestrator.py \\",
+    "  --catalog prod_catalog --schema ka_schema \\",
+    "  --source-host https://adb-source.7.azuredatabricks.net \\",
+    "  --source-client-id <sp-id> --source-client-secret <sp-secret>",
+    "",
+    "# or a source PAT instead of the SP:",
+    "#   --source-token dapiSOURCEXXted",
+]))
+D.append(body("Equivalent source env vars (used if the args are omitted):"))
+D.append(table(
+    ["Env var", "Purpose"],
+    [
+        ["`SOURCE_CLIENT_ID`", "Source SP client ID (tried first)."],
+        ["`SOURCE_CLIENT_SECRET`", "Source SP client secret."],
+        ["`SOURCE_DATABRICKS_TOKEN`", "Source PAT (fallback if SP not set/failing)."],
+    ],
+    [3200, 5800],
+))
+
+D.append(h2("Do I need the secret scope locally?"))
+D.append(table(
+    ["How you run", "Where it executes", "Secret scope needed?"],
+    [
+        ["Option A — bundle run", "Databricks compute", "YES — scope + source keys must exist on target first."],
+        ["Option B — python script", "Your laptop", "NO — pass source creds via --source-* args or SOURCE_* env vars."],
+    ],
+    [2600, 2600, 3800],
+))
+
+D.append(h2("Set up the secret scope (only for Option A)"))
+D.append(body("Create the scope once on the target workspace and add the source credential keys. The scope "
+              "name must match the secret_scope variable (default: ka-deployment)."))
+D.append(code([
+    "databricks secrets create-scope ka-deployment -p myprofile",
+    "databricks secrets put-secret ka-deployment source-client-id \\",
+    "  --string-value <sp-id>        -p myprofile",
+    "databricks secrets put-secret ka-deployment source-client-secret \\",
+    "  --string-value <sp-secret>    -p myprofile",
+    "# optional PAT fallback:",
+    "databricks secrets put-secret ka-deployment source-token \\",
+    "  --string-value dapiSOURCEXXX  -p myprofile",
+]))
+D.append(note("Credential resolution order in code: secret scope (Databricks runs only) → explicit CLI args "
+              "→ SOURCE_* env vars. Locally via Option B, the scope step returns nothing, so args/env vars win."))
+D.append(page_break())
+
+# ===========================================================================
+# TAB 9 — Status tables
+# ===========================================================================
+D.append(h1("9.  Status Tracking Tables"))
 D.append(h2("ka_deployment_status (deploy job)"))
 D.append(table(
     ["Column", "Meaning"],
@@ -622,7 +725,7 @@ D.append(page_break())
 # ===========================================================================
 # TAB 8 — Copying examples
 # ===========================================================================
-D.append(h1("9.  Copying Examples"))
+D.append(h1("10.  Copying Examples"))
 D.append(body("Example questions are copied only after a KA reaches ACTIVE. How this happens is controlled "
               "by the wait_and_copy_examples variable."))
 D.append(h2("Inline (wait_and_copy_examples = true)"))
@@ -647,7 +750,7 @@ D.append(page_break())
 # ===========================================================================
 # TAB 9 — Troubleshooting
 # ===========================================================================
-D.append(h1("10.  Troubleshooting"))
+D.append(h1("11.  Troubleshooting"))
 D.append(table(
     ["Symptom", "Likely cause & fix"],
     [
