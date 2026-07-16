@@ -29,8 +29,9 @@ resources:
         - environment_key: default
           spec:
             client: "1"
-            dependencies:
-              - databricks-sdk>=0.40.0
+            # NOTE: databricks-sdk is pre-installed on serverless. Do NOT add it
+            # to dependencies — pip would try to fetch it from PyPI, which the
+            # Serverless Access Controls Preview blocks (library install failure).
       tasks:
         - task_key: batch_deploy
           notebook_task:
@@ -66,8 +67,9 @@ resources:
         - environment_key: default
           spec:
             client: "1"
-            dependencies:
-              - databricks-sdk>=0.40.0
+            # NOTE: databricks-sdk is pre-installed on serverless. Do NOT add it
+            # to dependencies — pip would try to fetch it from PyPI, which the
+            # Serverless Access Controls Preview blocks (library install failure).
       tasks:
         - task_key: copy_examples
           notebook_task:
