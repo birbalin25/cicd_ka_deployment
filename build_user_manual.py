@@ -391,8 +391,20 @@ D.append(page_break())
 # ===========================================================================
 D.append(h1("5.  Prerequisites & Permissions Checklist"))
 D.append(body("Grant these BEFORE running the tool. Requirements are derived from the actual API and SDK "
-              "calls the jobs make. The identity is the Service Principal (or PAT owner) used for each "
-              "workspace — TARGET is where KAs are created, SOURCE is where they are exported from."))
+              "calls the jobs make. TARGET is where KAs are created; SOURCE is where they are exported from."))
+D.append(h2("Who needs these permissions — SP or PAT?"))
+D.append(body("Each workspace authenticates Service Principal FIRST, then falls back to a PAT if the SP is "
+              "not set or fails. So the permissions below must be held by whichever identity actually "
+              "authenticates to that workspace:"))
+D.append(bullet(run("If you configure the SP", bold=True)
+                + run(" → the Service Principal must hold the permissions.")))
+D.append(bullet(run("If you rely on the PAT", bold=True)
+                + run(" → the PAT owner (user) must hold the permissions.")))
+D.append(bullet(run("If you want the fallback to work", bold=True)
+                + run(" → grant BOTH the SP and the PAT owner, on each workspace independently "
+                      "(target and source are separate identities).")))
+D.append(note("This applies to every item below: target items 1–6 and 9 → the TARGET identity; "
+              "source items 7–8 → the SOURCE identity."))
 
 D.append(h2("Workspace & platform"))
 for b in [
@@ -404,9 +416,11 @@ for b in [
 ]:
     D.append(bullet(b))
 
-D.append(h2("TARGET identity — Knowledge Assistant"))
-D.append(body("The job creates KAs via POST/DELETE on the knowledge-assistants REST API and reads examples/"
-              "sources. The identity needs to create and manage KAs on the target."))
+D.append(h2("TARGET identity — Knowledge Assistant (target SP, or target PAT owner on fallback)"))
+D.append(body("Held by whichever identity authenticates to the TARGET workspace — the target Service "
+              "Principal (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET) if set, otherwise the target "
+              "PAT (STAGING_TOKEN / PROD_TOKEN) owner. The job creates KAs via POST/DELETE on the "
+              "knowledge-assistants REST API and reads examples/sources."))
 for b in [
     "Create, read, update, delete Knowledge Assistants (KA admin / can-manage on the target).",
     "Permission to create the KA's backing serving endpoint (serverless model serving).",
@@ -441,8 +455,10 @@ for b in [
 ]:
     D.append(bullet(b))
 
-D.append(h2("SOURCE identity"))
-D.append(body("Used to export KA definitions and (optionally) read volume files from the source workspace."))
+D.append(h2("SOURCE identity (source SP, or source PAT owner on fallback)"))
+D.append(body("Held by whichever identity authenticates to the SOURCE workspace — the source Service "
+              "Principal (source-client-id / source-client-secret) if set, otherwise the source PAT "
+              "(source-token) owner. Used to export KA definitions and (optionally) read volume files."))
 for b in [
     "Read Knowledge Assistants: GET knowledge-assistants, its knowledge-sources, and examples (can-view on the KAs to migrate).",
     "READ VOLUME on any file-based source volumes (files.list_directory_contents + files.download) when copy_volumes=true.",
