@@ -29,6 +29,8 @@ resources:
         - environment_key: default
           spec:
             client: "1"
+            dependencies:
+              - databricks-sdk>=0.40.0
       tasks:
         - task_key: batch_deploy
           notebook_task:
@@ -59,11 +61,13 @@ resources:
         - name: run_id
           default: ""
         - name: since_timestamp
-          default: ""
+          default: ${var.since_timestamp}
       environments:
         - environment_key: default
           spec:
             client: "1"
+            dependencies:
+              - databricks-sdk>=0.40.0
       tasks:
         - task_key: copy_examples
           notebook_task:

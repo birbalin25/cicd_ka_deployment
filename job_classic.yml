@@ -68,7 +68,7 @@ resources:
         - name: run_id
           default: ""
         - name: since_timestamp
-          default: ""
+          default: ${var.since_timestamp}
       job_clusters:
         - job_cluster_key: deploy_cluster
           new_cluster:
