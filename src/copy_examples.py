@@ -10,8 +10,11 @@ and KA state transitions to ACTIVE.
 
 Usage (Databricks notebook — invoked by the DAB job):
     Widgets: catalog, schema, status_table_name,
-             source_host, source_token, source_client_id,
-             source_client_secret, run_id
+             source_host, secret_scope, run_id, since_timestamp
+
+    - run_id (optional): deploy run to process (default: latest run).
+    - since_timestamp (optional): if set, process pending rows across all
+      runs whose completed_at is newer than this timestamp; overrides run_id.
 
 Usage (local):
     export DATABRICKS_HOST=https://target-workspace.cloud.databricks.com
@@ -55,6 +58,7 @@ def _resolve_params() -> dict:
             "source_host": dbutils.widgets.get("source_host"),
             "secret_scope": dbutils.widgets.get("secret_scope"),
             "run_id": dbutils.widgets.get("run_id"),
+            "since_timestamp": dbutils.widgets.get("since_timestamp"),
         }
 
     parser = argparse.ArgumentParser(description="Copy KA examples")
@@ -71,6 +75,9 @@ def _resolve_params() -> dict:
                         help="Source workspace SP client secret (local CLI only)")
     parser.add_argument("--run-id", default="",
                         help="Deploy run_id to process (default: latest)")
+    parser.add_argument("--since-timestamp", default="",
+                        help="Only process rows with completed_at newer than this "
+                             "timestamp (e.g. '2026-07-15 00:00:00'). Overrides --run-id.")
     args = parser.parse_args()
     return {
         "catalog": args.catalog,
@@ -82,6 +89,7 @@ def _resolve_params() -> dict:
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
         "run_id": args.run_id,
+        "since_timestamp": args.since_timestamp,
     }
 
 
@@ -120,30 +128,47 @@ def main() -> None:
     # Init examples table
     init_examples_table(spark, examples_table)
 
-    # Determine run_id filter
-    run_id_filter = (params.get("run_id") or "").strip()
-    if not run_id_filter:
-        latest = spark.sql(
-            f"SELECT run_id FROM {deploy_table} ORDER BY completed_at DESC LIMIT 1"
+    # Determine selection filter. A since_timestamp (if provided) takes
+    # precedence over run_id: it selects pending rows across all runs whose
+    # completed_at is strictly newer than the given timestamp.
+    since_timestamp = (params.get("since_timestamp") or "").strip()
+
+    if since_timestamp:
+        safe_ts = since_timestamp.replace("'", "")
+        print(f"Processing rows with completed_at > '{safe_ts}'")
+        candidates = spark.sql(
+            f"""
+            SELECT run_id, agent_id, target_ka_name,
+                   display_name_override, source_example_count,
+                   source_host, target_host
+            FROM {deploy_table}
+            WHERE completed_at > TIMESTAMP '{safe_ts}'
+              AND copied_examples = 'Pending'
+            """
         ).collect()
-        if not latest:
-            print("No rows found in deploy status table.")
-            return
-        run_id_filter = latest[0]["run_id"]
+    else:
+        # Determine run_id filter
+        run_id_filter = (params.get("run_id") or "").strip()
+        if not run_id_filter:
+            latest = spark.sql(
+                f"SELECT run_id FROM {deploy_table} ORDER BY completed_at DESC LIMIT 1"
+            ).collect()
+            if not latest:
+                print("No rows found in deploy status table.")
+                return
+            run_id_filter = latest[0]["run_id"]
 
-    print(f"Processing run_id: {run_id_filter}")
-
-    # Find KAs with examples pending copy
-    candidates = spark.sql(
-        f"""
-        SELECT run_id, agent_id, target_ka_name,
-               display_name_override, source_example_count,
-               source_host, target_host
-        FROM {deploy_table}
-        WHERE run_id = '{run_id_filter}'
-          AND copied_examples = 'Pending'
-        """
-    ).collect()
+        print(f"Processing run_id: {run_id_filter}")
+        candidates = spark.sql(
+            f"""
+            SELECT run_id, agent_id, target_ka_name,
+                   display_name_override, source_example_count,
+                   source_host, target_host
+            FROM {deploy_table}
+            WHERE run_id = '{run_id_filter}'
+              AND copied_examples = 'Pending'
+            """
+        ).collect()
 
     if not candidates:
         print("No KAs pending examples copy.")
@@ -157,18 +182,19 @@ def main() -> None:
     failed_count = 0
 
     for row in candidates:
+        row_run_id = row["run_id"]
         agent_id = row["agent_id"]
         target_ka_name = row["target_ka_name"]
         display_name = row["display_name_override"] or ""
         source_example_count = row["source_example_count"]
         ka_id = target_ka_name.split("/")[-1] if "/" in target_ka_name else target_ka_name
 
-        print(f"\nProcessing KA {agent_id} (target: {ka_id}) ...")
+        print(f"\nProcessing KA {agent_id} (run_id={row_run_id}, target: {ka_id}) ...")
 
         # Insert Pending row into examples table
         insert_examples_row(
             spark, examples_table,
-            run_id=run_id_filter,
+            run_id=row_run_id,
             job_id=job_id,
             job_run_id=job_run_id,
             agent_id=agent_id,
@@ -192,7 +218,7 @@ def main() -> None:
                 )
                 print(f"  {msg}")
                 update_examples_copy(
-                    spark, examples_table, run_id_filter, agent_id,
+                    spark, examples_table, row_run_id, agent_id,
                     "Pending", msg,
                 )
                 skipped_count += 1
@@ -250,19 +276,19 @@ def main() -> None:
 
             print(f"  {msg}")
             update_examples_copy(
-                spark, examples_table, run_id_filter, agent_id,
+                spark, examples_table, row_run_id, agent_id,
                 status, msg,
                 target_example_count=target_count,
             )
             if status == "Copied":
                 update_row_copied_examples(
-                    spark, deploy_table, run_id_filter, agent_id,
+                    spark, deploy_table, row_run_id, agent_id,
                     f"Examples copied successfully. Job_id={job_id}, Job_run_id={job_run_id}",
                 )
                 copied_count += 1
             else:
                 update_row_copied_examples(
-                    spark, deploy_table, run_id_filter, agent_id,
+                    spark, deploy_table, row_run_id, agent_id,
                     f"Partial copy ({target_count}/{source_example_count}). Job_id={job_id}, Job_run_id={job_run_id}",
                 )
 
@@ -270,17 +296,17 @@ def main() -> None:
             msg = f"Error: {ex}"
             print(f"  {msg}")
             update_examples_copy(
-                spark, examples_table, run_id_filter, agent_id,
+                spark, examples_table, row_run_id, agent_id,
                 "Failed", msg,
             )
             update_row_copied_examples(
-                spark, deploy_table, run_id_filter, agent_id,
+                spark, deploy_table, row_run_id, agent_id,
                 f"Failed: {ex}. Job_id={job_id}, Job_run_id={job_run_id}",
             )
             failed_count += 1
 
     print(f"\n{'='*60}")
-    print(f"Examples copy complete for run_id={run_id_filter}")
+    print(f"Examples copy complete")
     print(f"  Copied: {copied_count}  Skipped: {skipped_count}  Failed: {failed_count}")
     print(f"{'='*60}")
 
