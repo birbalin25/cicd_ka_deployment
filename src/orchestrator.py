@@ -75,6 +75,7 @@ def _resolve_params() -> dict:
             "source_host": dbutils.widgets.get("source_host"),
             "secret_scope": dbutils.widgets.get("secret_scope"),
             "wait_and_copy_examples": dbutils.widgets.get("wait_and_copy_examples"),
+            "deploy_wait_minutes": dbutils.widgets.get("deploy_wait_minutes"),
         }
 
     parser = argparse.ArgumentParser(description="Batch deploy KAs from CSV")
@@ -94,6 +95,9 @@ def _resolve_params() -> dict:
                         help="Source workspace SP client secret (local CLI only)")
     parser.add_argument("--wait-and-copy-examples", default="false",
                         help="Wait for KA ACTIVE and copy examples inline (default: false)")
+    parser.add_argument("--deploy-wait-minutes", default="40",
+                        help="Minutes to wait per KA for ACTIVE state when "
+                             "wait-and-copy-examples is true (default: 40)")
     args = parser.parse_args()
     return {
         "catalog": args.catalog,
@@ -105,6 +109,7 @@ def _resolve_params() -> dict:
         "source_client_id": args.source_client_id,
         "source_client_secret": args.source_client_secret,
         "wait_and_copy_examples": args.wait_and_copy_examples,
+        "deploy_wait_minutes": args.deploy_wait_minutes,
     }
 
 
@@ -249,6 +254,13 @@ def main() -> None:
     catalog = params["catalog"]
     schema = params["schema"]
     wait_and_copy = (params.get("wait_and_copy_examples") or "").strip().lower() == "true"
+
+    # Minutes to wait per KA for ACTIVE state (inline copy). Default 40.
+    try:
+        deploy_wait_minutes = int(float((params.get("deploy_wait_minutes") or "40").strip()))
+    except (ValueError, TypeError):
+        deploy_wait_minutes = 40
+    deploy_wait_secs = max(0, deploy_wait_minutes * 60)
 
     # Build status table name: use explicit param or default convention
     status_table_name = (params.get("status_table_name") or "").strip()
@@ -436,11 +448,11 @@ def main() -> None:
                 src_example_count = prow["source_example_count"]
                 ka_id = target_ka_name.split("/")[-1] if "/" in target_ka_name else target_ka_name
 
-                print(f"\n  Waiting for KA {ka_id} to become ACTIVE (max 30 min)...")
+                print(f"\n  Waiting for KA {ka_id} to become ACTIVE (max {deploy_wait_minutes} min)...")
 
                 try:
                     is_active, ka_state, wait_secs, checks = check_ka_active(
-                        target_client, ka_id, max_wait=1800, poll_interval=30
+                        target_client, ka_id, max_wait=deploy_wait_secs, poll_interval=30
                     )
 
                     if not is_active:

@@ -24,6 +24,8 @@ resources:
           default: ${var.secret_scope}
         - name: wait_and_copy_examples
           default: ${var.wait_and_copy_examples}
+        - name: deploy_wait_minutes
+          default: ${var.deploy_wait_minutes}
       job_clusters:
         - job_cluster_key: deploy_cluster
           new_cluster:
@@ -47,6 +49,7 @@ resources:
               source_host: "{{job.parameters.source_host}}"
               secret_scope: "{{job.parameters.secret_scope}}"
               wait_and_copy_examples: "{{job.parameters.wait_and_copy_examples}}"
+              deploy_wait_minutes: "{{job.parameters.deploy_wait_minutes}}"
           job_cluster_key: deploy_cluster
           libraries:
             - pypi:
@@ -69,6 +72,8 @@ resources:
           default: ""
         - name: since_timestamp
           default: ${var.since_timestamp}
+        - name: copy_wait_minutes
+          default: ${var.copy_wait_minutes}
       job_clusters:
         - job_cluster_key: deploy_cluster
           new_cluster:
@@ -93,6 +98,7 @@ resources:
               secret_scope: "{{job.parameters.secret_scope}}"
               run_id: "{{job.parameters.run_id}}"
               since_timestamp: "{{job.parameters.since_timestamp}}"
+              copy_wait_minutes: "{{job.parameters.copy_wait_minutes}}"
           job_cluster_key: deploy_cluster
           libraries:
             - pypi:

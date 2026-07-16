@@ -1,36 +1,103 @@
 variables:
+  # Prefix added to every job name (NO trailing space is added automatically,
+  # so include the underscore yourself). Set per environment in the targets
+  # section below. Example values: "Prod_", "Staging_", "Dev_"
+  # Result: "Prod_Batch_Deploy_Agents", "Prod_Copy_KA_Examples".
   env_prefix:
-    description: "Environment prefix for job names (no trailing space), e.g. Prod_ / Staging_ / Dev_"
+    description: "Environment prefix for job names (include trailing underscore). Example: Prod_"
     default: "Dev_"
+
+  # Default catalog KAs are deployed into. Overridden per-row in
+  # agents_input.csv (target_catalog column) when that column is non-empty.
+  # Example: "prod_catalog"
   target_catalog:
-    description: "Target catalog namee"
+    description: "Default target catalog name. Example: prod_catalog"
     default: "main"
+
+  # Default schema KAs are deployed into. Overridden per-row in
+  # agents_input.csv (target_schema column) when that column is non-empty.
+  # Example: "ka_schema"
   target_schema:
-    description: "Target schema name"
+    description: "Default target schema name. Example: ka_schema"
     default: "default"
+
+  # Fully-qualified Delta table used to track deployment status.
+  # Leave blank to use the convention {catalog}.{schema}.ka_deployment_status.
+  # Example: "main.ka.ka_deployment_status"
   status_table_name:
-    description: "Fully qualified Delta table for batch deployment status tracking (default: {catalog}.{schema}.ka_deployment_status)"
+    description: "Deploy status table (blank = {catalog}.{schema}.ka_deployment_status). Example: main.ka.ka_deployment_status"
     default: ""
+
+  # Source workspace to export KAs FROM. Leave blank to export from the same
+  # (target) workspace. Must be the full https URL.
+  # Example: "https://adb-1234567890123456.7.azuredatabricks.net"
   source_host:
-    description: "Source workspace URL for cross-workspace export (blank = same workspace)"
+    description: "Source workspace URL (blank = same workspace). Example: https://adb-xxxx.7.azuredatabricks.net"
     default: "https://adb-7405617211688462.2.azuredatabricks.net"
+
+  # Databricks secret scope holding the SOURCE workspace credentials.
+  # Expected keys inside the scope: source-token, source-client-id,
+  # source-client-secret. Example: "ka-deployment"
   secret_scope:
-    description: "Databricks secret scope containing source workspace credentials (keys: source-token, source-client-id, source-client-secret)"
+    description: "Secret scope with source creds (keys: source-token, source-client-id, source-client-secret). Example: ka-deployment"
     default: "ka-deployment"
+
+  # Serverless usage policy ID attached to the jobs. Leave blank to use the
+  # workspace default policy. Find IDs via: databricks budget-policies list
+  # Example: "511dfd24-7efe-312e-8213-04f11f170b29"
   budget_policy_id:
-    description: "Budget policy ID for serverless jobs. Leave empty to use the platform default. Find IDs via: databricks budget-policies list"
+    description: "Serverless usage policy ID (blank = default). Find via: databricks budget-policies list"
     default: "511dfd24-7efe-312e-8213-04f11f170b29"
+
+  # Controls WHEN example questions are copied.
+  #   "true"  -> deploy job waits for each KA to become ACTIVE and copies
+  #              examples inline (uses deploy_wait_minutes below).
+  #   "false" -> examples are deferred; run the Copy KA Examples job later.
+  # Example: "false"
   wait_and_copy_examples:
-    description: "If true, deploy job waits for KA ACTIVE state and copies examples inline. If false, examples are deferred to the Copy KA Examples job."
-    default: "false"
+    description: "true = copy examples inline in deploy job; false = defer to Copy KA Examples job. Example: false"
+    default: "true"
+
+  # Used only when wait_and_copy_examples=true. Flow: the deploy job first
+  # creates/migrates ALL KAs, then enters the copy phase. In the copy phase it
+  # polls (every 30s) for each KA to reach ACTIVE, up to this many MINUTES, then
+  # copies that KA's examples. This value is the MAX wait ceiling per KA, NOT a
+  # delay added for every KA — because all KAs provision in parallel during the
+  # create phase, they usually become ACTIVE around the same time, so the first
+  # KA absorbs most of the wait and later KAs are typically already ACTIVE.
+  # Default 40 minutes. Example: "40"
+  deploy_wait_minutes:
+    description: "Deploy job: max minutes to wait per KA for ACTIVE state before copying examples (inline). Example: 40"
+    default: "40"
+
+  # Max MINUTES the COPY KA EXAMPLES job polls (every 30s) for a KA to reach
+  # ACTIVE before skipping it and moving on. This is a per-KA ceiling, not an
+  # additive delay. Kept short because this job is meant to run AFTER files
+  # have already synced (so KAs should already be ACTIVE). A skipped KA stays
+  # Pending and is retried on the next run. Default 3 minutes. Example: "3"
+  copy_wait_minutes:
+    description: "Copy KA Examples job: max minutes to poll per KA for ACTIVE state before skipping. Example: 3"
+    default: "3"
+
+  # Copy KA Examples job filter. If set, only deploy rows whose completed_at
+  # is NEWER than this timestamp are processed (across all runs). Leave blank
+  # to process the latest run only.
+  # Timestamp format: YYYY-MM-DDTHH:MM:SS  (a bare date YYYY-MM-DD also works).
+  # Example: "2026-07-16T06:13:58"
   since_timestamp:
-    description: "Copy KA Examples job: if set, only process deploy rows with completed_at newer than this timestamp (e.g. '2026-07-15 00:00:00'). Empty = process latest run."
+    description: "Copy job: only process rows with completed_at newer than this. Format YYYY-MM-DDTHH:MM:SS. Example: 2026-07-16T06:13:58"
     default: "2026-07-16T06:13:58"
+
+  # Spark version for CLASSIC compute only (ignored on serverless).
+  # Example: "15.4.x-scala2.12"
   cluster_spark_version:
-    description: "Spark version for classic compute (ignored when compute_type=serverless)"
+    description: "Spark version for classic compute (ignored on serverless). Example: 15.4.x-scala2.12"
     default: "15.4.x-scala2.12"
+
+  # Node type for CLASSIC compute only (ignored on serverless).
+  # Example (Azure): "Standard_DS3_v2"  |  Example (AWS): "i3.xlarge"
   cluster_node_type:
-    description: "Node type for classic compute (ignored when compute_type=serverless)"
+    description: "Node type for classic compute (ignored on serverless). Example: Standard_DS3_v2"
     default: "Standard_DS3_v2"
 
 

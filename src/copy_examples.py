@@ -59,6 +59,7 @@ def _resolve_params() -> dict:
             "secret_scope": dbutils.widgets.get("secret_scope"),
             "run_id": dbutils.widgets.get("run_id"),
             "since_timestamp": dbutils.widgets.get("since_timestamp"),
+            "copy_wait_minutes": dbutils.widgets.get("copy_wait_minutes"),
         }
 
     parser = argparse.ArgumentParser(description="Copy KA examples")
@@ -78,6 +79,8 @@ def _resolve_params() -> dict:
     parser.add_argument("--since-timestamp", default="",
                         help="Only process rows with completed_at newer than this "
                              "timestamp (e.g. '2026-07-15 00:00:00'). Overrides --run-id.")
+    parser.add_argument("--copy-wait-minutes", default="3",
+                        help="Minutes to wait per KA for ACTIVE state (default: 3)")
     args = parser.parse_args()
     return {
         "catalog": args.catalog,
@@ -90,6 +93,7 @@ def _resolve_params() -> dict:
         "source_client_secret": args.source_client_secret,
         "run_id": args.run_id,
         "since_timestamp": args.since_timestamp,
+        "copy_wait_minutes": args.copy_wait_minutes,
     }
 
 
@@ -101,6 +105,13 @@ def main() -> None:
     params = _resolve_params()
     catalog = params["catalog"]
     schema = params["schema"]
+
+    # Minutes to wait per KA for ACTIVE state. Default 3.
+    try:
+        copy_wait_minutes = int(float((params.get("copy_wait_minutes") or "3").strip()))
+    except (ValueError, TypeError):
+        copy_wait_minutes = 3
+    copy_wait_secs = max(0, copy_wait_minutes * 60)
 
     deploy_table = (params.get("status_table_name") or "").strip()
     if not deploy_table:
@@ -208,7 +219,7 @@ def main() -> None:
         try:
             # Sanity check: is KA ACTIVE?
             is_active, ka_state, wait_secs, checks = check_ka_active(
-                target_client, ka_id, max_wait=180, poll_interval=30
+                target_client, ka_id, max_wait=copy_wait_secs, poll_interval=30
             )
 
             if not is_active:
